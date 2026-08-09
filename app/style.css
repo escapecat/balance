@@ -418,6 +418,18 @@ input:focus, select:focus {
   display: flex; background: var(--surface);
   border-top: 1px solid var(--border);
   padding-bottom: env(safe-area-inset-bottom);
+  /* ⚠️ **向下溢出一块实心色，盖住底部安全区。**
+     `padding-bottom: env(safe-area-inset-bottom)` 理论上够了 ——
+     但它依赖 env() 在这台设备、这个显示模式下真的算出非零值，
+     而那件事我在开发机上验证不了。真机上的表现是 tab 栏文字下面
+     还留着一条几十像素的深色，看起来像 tab 栏没贴到屏幕底。
+
+     box-shadow 的第四个参数是**扩散**：向下 60px、四周再扩 60px，
+     画出的是一块不受任何高度计算影响的实心矩形。
+     它不参与布局、不接受点击，唯一作用就是「那一块一定有颜色」。
+     ⚠️ 这不优雅，但它不依赖任何我验证不了的前提 —— 而前面几轮
+     依赖前提的修法，每一次都赌错了。 */
+  box-shadow: 0 60px 0 60px var(--surface);
 }
 /* ⚠️ **毛玻璃只在「内容能滑到它后面」时才成立。**
    早先这里是 86% 不透明 + backdrop-filter：内容长的页面(设置)底下压着

@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>底部到底怎么回事</title>
+<!--
+  ⚠️ 一次性诊断页。查完删掉。
+
+  底部那条黑边我改了四轮都没对，根本原因是**我看不到你的屏幕**，
+  每一轮都在赌一个自己验证不了的前提：
+      env() 到底算出多少？tab 栏实际多高？它的底边在哪？
+  这一页把这些数字直接显示出来，省掉猜的环节。
+
+  ⚠️ 必须**从主屏图标打开**才准。Safari 里打开是另一套数值
+     （有地址栏、没有 standalone 安全区），量出来的东西不作数。
+-->
+<style>
+  body { font: 15px/1.7 system-ui, "PingFang SC", sans-serif;
+         margin: 0; padding: env(safe-area-inset-top) 16px 200px;
+         background: #131519; color: #e9ebef; }
+  h1 { font-size: 18px; margin: 16px 0 4px; }
+  p.sub { color: #9aa1ac; font-size: 13px; margin: 0 0 20px; }
+  .row { display: flex; justify-content: space-between; gap: 12px;
+         padding: 10px 0; border-top: 1px solid #2e333b; }
+  .k { color: #9aa1ac; font-size: 13px; }
+  .v { font-family: ui-monospace, Menlo, Consolas, monospace; font-weight: 600; }
+  .bad { color: #f07167; }
+  .ok { color: #5cbc86; }
+  /* 和真 app 一模一样的 tab 栏 —— 就是要复现那条黑边 */
+  .tabbar {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
+    display: flex; background: #1c1f25;
+    border-top: 1px solid #2e333b;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .tabbar button { flex: 1; min-height: 52px; background: none; border: 0;
+                   color: #9aa1ac; font: inherit; font-size: 11px; }
+  /* 一条**贴着屏幕最底**的红线。tab 栏底边和它之间的距离，就是那条黑边 */
+  .floor { position: fixed; left: 0; right: 0; bottom: 0; height: 3px;
+           background: #f07167; z-index: 30; }
+</style>
+</head>
+<body>
+
+<h1>底部到底怎么回事</h1>
+<p class="sub">⚠️ 从<b>主屏图标</b>打开才准。Safari 里打开是另一套数值。</p>
+
+<div id="out"></div>
+
+<div class="tabbar">
+  <button>现在</button><button>历史</button><button>统计</button><button>设置</button>
+</div>
+<div class="floor"></div>
+
+<script>
+function px(n) { return Math.round(n) + ' px'; }
+function row(k, v, cls) {
+  return '<div class="row"><span class="k">' + k + '</span>' +
+         '<span class="v ' + (cls || '') + '">' + v + '</span></div>';
+}
+var probe = document.createElement('div');
+probe.style.cssText = 'position:fixed;bottom:0;height:env(safe-area-inset-bottom);width:1px;';
+document.body.appendChild(probe);
+var safeBottom = probe.getBoundingClientRect().height;
+
+var bar = document.querySelector('.tabbar');
+var r = bar.getBoundingClientRect();
+var vh = window.innerHeight;
+// tab 栏底边到屏幕最底还差多少 —— **这就是那条黑边的高度**
+var gapBelow = vh - r.bottom;
+
+var html = '';
+html += row('屏幕可视高度 innerHeight', px(vh));
+html += row('env(safe-area-inset-bottom)', px(safeBottom),
+            safeBottom > 0 ? 'ok' : 'bad');
+html += row('tab 栏高度', px(r.height));
+html += row('tab 栏底边位置', px(r.bottom));
+html += row('★ tab 栏底下还剩', px(gapBelow), Math.abs(gapBelow) < 1 ? 'ok' : 'bad');
+html += row('display-mode: standalone',
+            (window.matchMedia && matchMedia('(display-mode: standalone)').matches)
+              ? '是' : '否(不准)',
+            (window.matchMedia && matchMedia('(display-mode: standalone)').matches) ? 'ok' : 'bad');
+html += row('devicePixelRatio', window.devicePixelRatio);
+document.getElementById('out').innerHTML = html;
+
+var note = document.createElement('p');
+note.className = 'sub';
+note.style.marginTop = '20px';
+note.innerHTML = Math.abs(gapBelow) < 1
+  ? '<b>tab 栏已经贴到屏幕最底</b>（红线就在它下面）。那条黑边如果还在，'
+  + '说明它不是 tab 栏的位置问题，而是颜色问题 —— 把这一页的数字发我。'
+  : '<b>tab 栏底边离屏幕底还有 ' + px(gapBelow) + '</b>，那就是黑边的高度。'
+  + '把这一页的数字发我。';
+document.body.insertBefore(note, document.querySelector('.tabbar'));
+</script>
+</body>
+</html>

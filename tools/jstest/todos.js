@@ -157,5 +157,42 @@ Todos.complete('sell:007466', 80000, '2026-08-10');
 ok(Todos.netByCategory()['红利低波'] === -80000,
    '卖出在累计流水里是负的(实得 ' + Todos.netByCategory()['红利低波'] + ')');
 
+// ---- 勾选 / 改金额 / 撤销:一条待办**只对应一笔流水** ----
+//
+// ⚠️ 早先 complete 是无脑 append,于是界面上「改金额」变成了追加:
+//    记一笔、改一次金额,flows[] 里就两条,净买入直接翻倍。
+//    而待办上只显示最后那个金额 —— **清单看着完全正常**,
+//    收益率却按双倍投入算,分母错了所有收益率跟着错。
+//
+// ⚠️ 撤销也必须把流水一起带走。只改状态的话,清单说你没做、
+//    收益率说你投了,两边对不上而且没人报错。
+(function () {
+  mem = {};
+  Store.set('todos', []);
+  Store.set('flows', []);
+  Actions.startFrom('2026-07-30');
+
+  var plan = { today: [{ category: '黄金', fund: { code: '000216', name: '黄金基金' },
+                         amount: 30000 }], daily: [] };
+  Todos.sync(plan, '2026-07-30', '2026-08-10');
+  var t = Todos.open()[0];
+
+  Todos.complete(t.id, 20000, '2026-08-10');
+  ok(Actions.all().length === 1, '★ 勾一次应该只有 1 条流水,实际 ' + Actions.all().length);
+
+  Todos.complete(t.id, 25000, '2026-08-10');
+  ok(Actions.all().length === 1,
+     '★ 改金额是修正同一笔,不是又买一次 —— 流水应该还是 1 条,实际 ' +
+     Actions.all().length);
+  ok(Actions.netBuy('2026-07-30', '2026-08-31').total === 25000,
+     '★ 净买入应该是改后的金额,实际 ' + Actions.netBuy('2026-07-30', '2026-08-31').total);
+
+  var r = Todos.undo(t.id);
+  ok(r.ok && r.removed === 1, '撤销应该删掉那 1 条流水,实际删了 ' + r.removed);
+  ok(Actions.all().length === 0, '★ 撤销后不许留下流水 —— 清单说没做、收益率说投了');
+  ok(Todos.all()[0].status === 'open' && Todos.all()[0].actual === null,
+     '★ 撤销后待办要回到 open 且清掉实际金额');
+})();
+
 if (fail) { console.log('  ' + fail + ' 条没过'); process.exit(1); }
-console.log('  待办 ok(id 跨期稳定 · bornAt 不漂 · resolved≠done · partial 不消失 · 勾选写流水)');
+console.log('  待办 ok(id 跨期稳定 · bornAt 不漂 · resolved≠done · partial 不消失 · 勾选写流水 · 改金额不重复记 · 撤销带走流水)');

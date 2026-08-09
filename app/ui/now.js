@@ -550,9 +550,37 @@ var NowUI = (function () {
                    body: '缺口是被市值涨平的,不是你买的 —— 所以不记成「做了」。' });
       return;
     }
-    if (t.status === 'done') {
-      Modal.note({ title: '已经记过了',
-                   body: '实际 ¥' + money(t.actual) + ',' + t.doneAt + ' 记的。' });
+    // ⚠️ 已经记过的**不能是死胡同**。原先这里只弹一句「已经记过了」就完了 ——
+    //    金额敲错一位、买卖点反、根本没买成,一个都改不了。
+    //    而清单外的买卖在「清单外记的」那块能删,清单内的反而不能,
+    //    同一件事两种待遇。
+    if (t.status === 'done' || t.status === 'partial') {
+      Modal.pick({
+        title: '已经记过了',
+        hint: (t.kind === 'sell' ? '卖' : '买') + ' ' + t.name +
+              ' · 实际 ¥' + money(t.actual) + ' · ' + t.doneAt + ' 记的' +
+              (t.status === 'partial' ? '(没做完,还剩 ¥' + money(t.target) + ')' : ''),
+        options: [
+          { key: 'edit', label: '改金额', hint: '敲错了一位就改这个' },
+          { key: 'undo', label: '撤销这一笔', danger: true,
+            hint: '连同它写的那条流水一起删掉,清单上重新挂回去' },
+        ],
+      }).then(function (v) {
+        if (v === 'edit') { askAmount(t); return; }
+        if (v !== 'undo') return;
+        Modal.confirm({
+          title: '撤销这一笔?',
+          // ⚠️ 说清后果:撤销会改动「工资−花费」和「市场涨跌」。
+          body: '那条流水会被删掉,这笔钱重新算进「市场涨跌」—— ' +
+                '真买过的话,数字就错了。',
+          ok: '撤销', danger: true,
+        }).then(function (yes) {
+          if (!yes) return;
+          var r = Todos.undo(t.id);
+          if (!r.ok) { Modal.note({ title: '撤不了', body: r.why }); return; }
+          render();
+        });
+      });
       return;
     }
     Modal.pick({

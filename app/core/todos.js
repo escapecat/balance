@@ -146,6 +146,19 @@ var Todos = (function () {
     t.status = amount + 1 < t.target ? 'partial' : 'done';
 
     Store.set('todos', list);
+
+    // ⚠️ **先删掉这条待办以前写的流水,再写新的。**
+    //    早先是无脑 append,于是「改金额」(界面上再勾一次)变成了追加:
+    //    买了两万六记一条、改成两万六千四又记一条,净买入直接翻倍,
+    //    而待办上只显示最后那个金额 —— 清单看着完全正常,
+    //    收益率却按双倍的投入算,**分母错了所有收益率都错**。
+    //
+    //    语义上也该这样:一条待办对应「你为这件事做的那一笔」,
+    //    改金额是修正同一笔,不是又买了一次。真的又买了一次,
+    //    那是清单外的第二笔,走「记一笔买卖」。
+    Actions.all().slice().forEach(function (f) {
+      if (f.todoId === t.id) Actions.remove(f.id);
+    });
     appendFlow({ date: today, kind: t.kind, category: t.category,
                  code: t.code, amount: amount, todoId: t.id });
     return { ok: true, status: t.status };
@@ -162,6 +175,32 @@ var Todos = (function () {
     t.doneAt = today;
     Store.set('todos', list);
     return { ok: true };
+  }
+
+  /** 撤销一次勾选 —— 记错了、金额敲错一位、根本没买。
+   *
+   *  ⚠️ **必须把它写的流水一起删掉。** 只把状态改回 open 的话,
+   *     那笔流水还留在 flows[] 里,于是「净买入」照旧算着它 ——
+   *     清单说你没做,收益率说你投了,两边对不上而且没人报错。
+   *
+   *  ⚠️ 删的是**所有 todoId 指向它的**流水,不是只删一条。
+   *     complete 可以被调多次(改金额就是再勾一次),每次都 append 一条。
+   *
+   *  @return {ok, removed} removed = 删了几条流水
+   */
+  function undo(id) {
+    var list = all().slice();
+    var t = list.filter(function (x) { return x.id === id; })[0];
+    if (!t) return { ok: false, why: '没有这条待办' };
+    var gone = 0;
+    Actions.all().slice().forEach(function (f) {
+      if (f.todoId === id) { Actions.remove(f.id); gone++; }
+    });
+    t.status = 'open';
+    t.actual = null;
+    t.doneAt = null;
+    Store.set('todos', list);
+    return { ok: true, removed: gone };
   }
 
   /** 手动让一条「不做了」的重新进清单 —— 下次 sync 时它会照常长出来。 */
@@ -197,7 +236,7 @@ var Todos = (function () {
   function netByCategory() { return Actions.netByCategory(); }
 
   return { all: all, flows: flows, keyOf: keyOf, sync: sync,
-           complete: complete, drop: drop, revive: revive,
+           complete: complete, drop: drop, revive: revive, undo: undo,
            pendingDays: pendingDays, open: open,
            appendFlow: appendFlow, netByCategory: netByCategory };
 })();

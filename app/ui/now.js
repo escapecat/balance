@@ -165,8 +165,13 @@ var NowUI = (function () {
     var prev = c.snaps.length > 1 ? c.snaps[c.snaps.length - 2] : null;
     var d = prev ? Ledger.delta(c.snap, prev) : null;
     if (d && d.change != null) {
+      // ⚠️ 别叫「上一期」。它显示的是**最近这一期**发生的事
+      //    (从上次对账到这次对账之间),而「上一期」听起来像「过去那一期」——
+      //    于是你今天记的买卖出现在这里就很诡异:明明是今天的事,
+      //    怎么算到「上一期」头上去了。
+      //    区间的归属规则是:两次对账之间发生的一切,都归后一次。
       w.appendChild(h('h2', {}, [
-        '上一期',
+        '这一期',
         h('span', { class: 'n' }, [
           prev.date.slice(5).replace('-', '/') + ' → ' + c.snap.date.slice(5).replace('-', '/'),
         ]),
@@ -185,6 +190,52 @@ var NowUI = (function () {
           '**记买卖就够了** —— 涨跌和投入是解出来的,一个数都不用手填。',
         ]));
       }
+
+      // ---- 记了买卖但余额没跟上 ----
+      //
+      // ⚠️ 「市场涨跌是负的、工资−花费是正的」这个组合**只有一种解释**:
+      //    你记了买入,可这一期的持仓没有相应增加。
+      //        工资−花费 = 现金变化 + 净买入 = 0 + 10000 = +10000
+      //        市场涨跌   = 持仓变化 − 净买入 = 0 − 10000 = −10000
+      //    钱像是凭空进来的,持仓像是凭空亏的 —— 两个数都很难看,
+      //    而它们其实在说同一件事。
+      //
+      // ⚠️ 最常见的原因**不是你记错了**:基金申购 T+1 确认,
+      //    今天买的今天在基金 app 里还看不到,你抄的余额自然没变。
+      //    所以这里不报错、不说「数据有问题」,只解释,并给一条路过去改。
+      var held = Portfolio.sum(c.snap.holdings) - Portfolio.sum(prev.holdings);
+      if (d.netBuy > 0 && held < d.netBuy * 0.5) {
+        w.appendChild(h('div', { class: 'note warn' }, [
+          '你记了买入 **¥' + money(d.netBuy) + '**,但这一期的持仓只多了 **¥' +
+          money(Math.max(0, held)) + '** —— 基金申购要 T+1 确认,' +
+          '今天买的明天才进持仓,所以上面两个数会一正一负地夸张一下。',
+        ]));
+        w.appendChild(h('div', { class: 'hint' }, [
+          '**等到账之后重录这一期**就对了(录入是覆盖,不会重复);' +
+          '或者那几笔本来就记错了,进去撤掉。',
+        ]));
+        w.appendChild(h('button', {
+          class: 'btn ghost', style: 'margin-top:8px',
+          onclick: function () { view = 'plan'; render(); },
+        }, ['去看这几笔']));
+      }
+    }
+
+    // ---- 还没归期的买卖 ----
+    //
+    // ⚠️ **记了买卖但还没录下一期时,那几笔不属于任何区间。**
+    //    上面那三个数是「上次对账 → 这次对账」之间的事,和它们无关 ——
+    //    可页面上要是一个字不说,你会以为「我记了怎么没反应」,
+    //    然后去翻是不是没记上,或者干脆再记一遍。
+    var pending = Actions.between(c.snap.date, null);
+    if (pending.length) {
+      var pn = 0;
+      pending.forEach(function (a) { pn += (a.kind === 'sell' ? -1 : 1) * a.amount; });
+      w.appendChild(h('div', { class: 'note', style: 'margin-top:16px' }, [
+        c.snap.date.slice(5).replace('-', '/') + ' 之后记了 **' + pending.length +
+        ' 笔**买卖(净 ¥' + money(pn) + ')。它们**还没算进上面的数** —— ' +
+        '要等你录下一期,才知道这段时间市场给了多少。',
+      ]));
     }
 
     // ---- 入口 ----

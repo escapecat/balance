@@ -101,11 +101,22 @@ function makeCtx(seed) {
   };
   sandbox.window = sandbox; sandbox.globalThis = sandbox;
   var c = vm.createContext(sandbox);
+  // ⚠️ 得容忍 `?v=时间戳`(commit.sh 打的破缓存版本号),并且**剥掉它**再读文件。
+  //    原来的正则是 `src="([^"]+\.js)"`,版本号一加就一个都匹配不到 ——
+  //    于是这里一个脚本都不加载,而失败信息是「Store 没加载出来」,
+  //    看起来像 store.js 坏了,实际上是这行正则过时了。
+  var loaded = 0;
   fs.readFileSync(path.join(APP, 'index.html'), 'utf8')
-    .replace(/src="([^"]+\.js)"/g, function (_, f) {
+    .replace(/src="([^"?]+\.js)(?:\?v=\d+)?"/g, function (_, f) {
       vm.runInContext(fs.readFileSync(path.join(APP, f), 'utf8'), c, { filename: f });
+      loaded++;
       return _;
     });
+  // 一个都没加载 = 正则和 index.html 又对不上了。**当场喊出来**,
+  // 否则下面每一条断言都会失败,而没有一条指向真正的原因。
+  if (loaded < 5) {
+    throw new Error('boot: 只从 index.html 里认出 ' + loaded + ' 个脚本 —— 正则过时了');
+  }
   c.__app = appDiv;
   c.__mem = mem;
   return c;

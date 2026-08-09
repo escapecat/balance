@@ -153,17 +153,22 @@ var StatsUI = (function () {
       (cut ? ' · 只画最近 ' + MAX_BARS + ' 期,更早的 ' + cut + ' 期没画' : ''),
     ]));
 
-    // ---- 现在的配置 ----
+    // ---- 结构变化 ----
     //
-    // ⚠️ 「结构变化」那张图看的是**趋势**,这一段看的是**此刻**。
-    //    只给趋势图的话,你得眯着眼从最后一根柱子上估当前占比 ——
-    //    而那正是最常问的一个数。
-    w.appendChild(h('h2', {}, ['现在的配置']));
+    // ⚠️ 这里**没有「现在的配置」那一段**,是删掉的,不是忘了做。
+    //    原先有个环形图画当前占比,和两处重复:
+    //      · 跨页 —— 「现在」页的配置表就是此刻的占比,而且带缺口金额,
+    //                能直接照着买;环形图只有百分比,看完还得换一页才知道该做什么。
+    //      · 页内 —— 下面这张堆叠柱的**最后一根就是那个环形图**。
+    //    当初给它写的理由是「趋势图上得眯着眼估当前占比」——
+    //    可那件事「现在」页已经用更好的形式做了,理由就不成立了。
     var cur = shown[shown.length - 1];
     var cats = orderCats(comp);
-    w.appendChild(donut(cur, cats));
+    w.appendChild(h('h2', {}, ['结构变化']));
+    w.appendChild(stackChart(shown, cats));
+    // 图例跟着堆叠柱走 —— 那张图没图例读不懂,而它原先挂在环形图下面。
     var lg = h('div', { class: 'legend' });
-    cats.forEach(function (c, i) {
+    cats.forEach(function (c) {
       if (!(cur.pct[c] > 0)) return;
       lg.appendChild(h('span', { class: 'lg' }, [
         h('i', { style: 'background:' + hue(c) }),
@@ -171,10 +176,6 @@ var StatsUI = (function () {
       ]));
     });
     w.appendChild(lg);
-
-    // ---- 结构变化 ----
-    w.appendChild(h('h2', {}, ['结构变化']));
-    w.appendChild(stackChart(shown, cats));
     var f0 = shown[0], f1 = cur;
     var moved = cats.map(function (c) {
       return { c: c, from: f0.pct[c] || 0, to: f1.pct[c] || 0 };
@@ -305,40 +306,6 @@ var StatsUI = (function () {
     return ctx.box;
   }
 
-  /** 当前配置的环形图。
-   *  ⚠️ 用环不用饼:中间那个洞可以放总额,而饼图的圆心什么也放不下。 */
-  function donut(cur, cats) {
-    var W = 320, R = 52, C = 2 * Math.PI * R, cx = W / 2, cy = 68;
-    var ctx = chartBox();
-    var svg = s('svg', { viewBox: '0 0 ' + W + ' 140', width: '100%',
-                         role: 'img', 'aria-label': '当前各类占比' });
-    var off = 0;
-    cats.forEach(function (c, i) {
-      var p = cur.pct[c] || 0;
-      if (p <= 0) return;
-      var arc = s('circle', {
-        cx: cx, cy: cy, r: R, fill: 'none',
-        stroke: hue(c), 'stroke-width': '20',
-        'stroke-dasharray': (p * C) + ' ' + C,
-        'stroke-dashoffset': -off * C,
-        transform: 'rotate(-90 ' + cx + ' ' + cy + ')',
-      });
-      svg.appendChild(bindTip(arc, ctx, [
-        [c], ['占比', pct(p)], ['金额', '¥' + money(cur.by[c])],
-      ]));
-      off += p;
-    });
-    svg.appendChild(s('text', {
-      x: cx, y: cy - 2, 'text-anchor': 'middle', 'font-size': '15',
-      'font-weight': '650', fill: 'currentColor',
-    }, [txt('¥' + money(cur.total))]));
-    svg.appendChild(s('text', {
-      x: cx, y: cy + 14, 'text-anchor': 'middle', 'font-size': '9',
-      fill: 'currentColor', opacity: '.55',
-    }, [txt(cur.external ? '组合 ' + money(cur.portfolio) + ' + 组合外' : md(cur.date))]));
-    ctx.box.insertBefore(svg, ctx.pop);
-    return ctx.box;
-  }
 
   /** 堆叠柱 —— 每期一根,叠起来正好 100%。
    *

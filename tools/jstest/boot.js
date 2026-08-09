@@ -188,12 +188,23 @@ var withCommas = String(wantTotal).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 ok(tn.indexOf(withCommas) >= 0 || tn.indexOf(String(wantTotal)) >= 0,
    '★ 首屏没显示最新一期的组合总额 —— 那是这一页的第一行');
 
-// 计划里排第一的那一类必须出现在首屏 —— 那是这个 app 的主要产出
+// ⚠️ 主界面**故意不显示清单** —— 清单在「方案屏」里,录完一期自动进。
+//    所以这里分两段测:主界面有入口(不然方案屏永远到不了),
+//    方案屏有产出。合在一起测的话,「主界面没清单」这个设计
+//    和「清单算错了」这个 bug 长得一模一样。
+ok(tn.indexOf('该做什么') >= 0,
+   '★ 主界面没有通往方案屏的入口 —— 清单是跨天的,没入口就再也回不去');
+
 var plan = ctx.Allocate.planMonthly(latest, ctx.Store.get('settings', {}));
 var head = (plan.today[0] || plan.daily[0] || {}).category;
-ok(head && tn.indexOf(head) >= 0,
-   '★ 首屏没给出「今天买什么」(算出来该买 ' + head + ')');
-ok(plan.daily.length === 0 || tn.indexOf(plan.daily[0].category) >= 0,
+
+var planEl = new El('div');
+ctx.NowUI.showPlan();
+ctx.NowUI.mount(planEl, { onEntry: function () {} });
+var tp = deep(planEl).replace(/\s/g, '');
+ok(head && tp.indexOf(head) >= 0,
+   '★ 方案屏没给出「今天买什么」(算出来该买 ' + head + ')');
+ok(plan.daily.length === 0 || tp.indexOf(plan.daily[0].category) >= 0,
    '按日投那几项没出来');
 
 // ---- 4. 设置页要把未分类的露出来 ----
@@ -244,5 +255,5 @@ ok(!ctx2.__mem[NS + 'todos'] ||
    '★ 被拦住时待办被写了 —— 「现在」页渲染时会同步待办,说明它还是挂上了');
 
 console.log(fail ? '开机 ' + fail + ' 处不对'
-                 : '  开机 ok(空数据不白屏 · 真实数据能挂 · 首屏算得出该买什么)');
+                 : '  开机 ok(空数据不白屏 · 真实数据能挂 · 方案屏算得出该买什么)');
 process.exit(fail ? 1 : 0);

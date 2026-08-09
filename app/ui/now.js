@@ -10,7 +10,16 @@
 
 var NowUI = (function () {
 
+  // ⚠️ 两个视图，不是两个页面。
+  //    `home` —— 打开 app 看到的：我有多少、上一期发生了什么、两个入口。
+  //    `plan` —— **录完一期之后自动进的**：配置偏到哪儿、这一期该买什么。
+  //
+  //    早先这两块挤在同一屏。问题不是挤，是**时机不对**：
+  //    再平衡建议依附于「刚录完一期」这个事件，做完就该结束；
+  //    而它常驻首屏的话，一个月里剩下的 29 天你每次打开都被同一份
+  //    已经做完的清单挡着，久了就自动忽略 —— 那它该提醒你的时候也提醒不动了。
   var el, onEntry = null;
+  var view = 'home';
 
   function h(tag, attrs, kids) {
     var n = document.createElement(tag);
@@ -40,6 +49,168 @@ var NowUI = (function () {
 
   function monthLabel() {
     return today().slice(5, 7).replace(/^0/, '') + ' 月';
+  }
+
+  /** 录完一期之后跳过来。app.js 在 EntryUI 的 onDone(true) 里调。 */
+  function showPlan() { view = 'plan'; }
+
+  var NS = 'http://www.w3.org/2000/svg';
+  /** ⚠️ SVG 得用带命名空间的创建方式。用 createElement 建出来的
+   *     在页面上是**看不见的** —— 浏览器当成未知 HTML 标签,不报错也不画。 */
+  function sv(tag, attrs) {
+    var n = document.createElementNS(NS, tag);
+    Object.keys(attrs || {}).forEach(function (k) {
+      if (attrs[k] != null) n.setAttribute(k, attrs[k]);
+    });
+    return n;
+  }
+
+  /** 总额走势的缩略线 —— 压在 hero 卡片右下角当背景。
+   *
+   *  ⚠️ 它是**装饰兼氛围**,不承担读数的职责:没有坐标轴、没有标注,
+   *     要看具体数字去统计页。所以两期以下直接不画 ——
+   *     两个点连成的一条直线看着像「一直在涨」,而那是没有信息的。
+   *
+   *  ⚠️ 归一化用 min/max 而不是 0 起点。总额都在 200 万上下浮动,
+   *     从 0 起画的话那条线是一条笔直的横线,什么也看不出来。 */
+  function sparkline(snaps, st) {
+    if (!snaps || snaps.length < 3) return null;
+    var pts = snaps.slice(-12).map(function (x) {
+      return Portfolio.sum(x.holdings) + Portfolio.sum(x.cash);
+    });
+    var lo = Math.min.apply(null, pts), hi = Math.max.apply(null, pts);
+    if (!(hi > lo)) return null;
+    var W = 150, H = 40;
+    var d = pts.map(function (v, i) {
+      var x = (i / (pts.length - 1)) * W;
+      var y = H - ((v - lo) / (hi - lo)) * (H - 4) - 2;
+      return (i ? 'L' : 'M') + x.toFixed(1) + ',' + y.toFixed(1);
+    }).join(' ');
+    var svg = sv('svg', { viewBox: '0 0 ' + W + ' ' + H, class: 'hero-spark',
+                          'aria-hidden': 'true', preserveAspectRatio: 'none' });
+    svg.appendChild(sv('path', {
+      d: d + ' L' + W + ',' + H + ' L0,' + H + ' Z',
+      fill: 'rgba(255,255,255,.10)', stroke: 'none',
+    }));
+    svg.appendChild(sv('path', {
+      d: d, fill: 'none', stroke: 'rgba(255,255,255,.45)', 'stroke-width': '1.5',
+      'stroke-linejoin': 'round', 'stroke-linecap': 'round',
+    }));
+    return svg;
+  }
+
+  /** 总额卡片 —— 两个视图共用。
+   *  ⚠️ 早先 now.js 和 history.js 各写了一遍,改了一边另一边就成了
+   *     「新背景 + 旧结构」。同一个视觉块只许有一处定义。 */
+  function heroBlock(c, withSpark) {
+    var hero = h('div', { class: 'hero' });
+    if (withSpark) {
+      var sp = sparkline(c.snaps, c.st);
+      if (sp) hero.appendChild(sp);
+    }
+    hero.appendChild(h('div', { class: 'hero-cap' }, ['总资产']));
+    hero.appendChild(h('div', { class: 'hero-num' }, ['¥' + money(c.sm.total + c.ext)]));
+    // ⚠️ 组合和组合外拆成两格,不挤在一行灰字里 ——
+    //    「这两个加起来才是上面那个」这层关系,并排才读得出来。
+    //    组合外为 0 时整格不出现:一个写着 ¥0 的格子只会让人以为漏填了。
+    var split = h('div', { class: 'hero-split' });
+    split.appendChild(h('div', {}, [
+      h('span', { class: 'k' }, ['投资组合']),
+      h('span', { class: 'v' }, ['¥' + money(c.sm.total)]),
+    ]));
+    if (c.ext) {
+      split.appendChild(h('div', {}, [
+        h('span', { class: 'k' }, ['组合外']),
+        h('span', { class: 'v' }, ['¥' + money(c.ext)]),
+      ]));
+    }
+    hero.appendChild(split);
+    hero.appendChild(h('div', { class: 'hero-sub' }, [
+      h('span', { class: 'pill' + (c.stale ? ' warn' : '') }, [
+        c.snap.date.slice(5).replace('-', '/') +
+        (c.age > 0 ? ' · ' + c.age + ' 天前' : ' · 今天'),
+      ]),
+    ]));
+    return hero;
+  }
+
+  /** 主界面 —— **回顾 + 两个入口**,没有清单。
+   *
+   *  ⚠️ 这里放「上一期发生了什么」而不是「接下来该做什么」,是刻意的分工:
+   *     该做什么依附于「刚录完一期」那个瞬间,做完就结束(在方案屏);
+   *     而发生了什么是**每次打开都值得看一眼**的 —— 它不会因为你看过就失效。
+   *
+   *  ⚠️ 主角是「市场涨跌」,因为**这个数别处拿不到**。
+   *     基金 app 只告诉你总额变了多少,而那个数混着你自己投进去的钱 ——
+   *     总额涨了五万多,其中哪部分是赚的、哪部分是你搬进去的,只有这儿分得开。
+   */
+  function renderHome(w, c) {
+    w.appendChild(heroBlock(c, true));
+
+    if (c.extBlank.length) {
+      w.appendChild(h('div', {
+        class: 'note', style: 'margin-bottom:12px', onclick: function () { onEntry(); },
+      }, [
+        c.extBlank.join('、') + ' 还没填过金额,**没算进上面这个数** —— 录入时补一下。',
+      ]));
+    }
+
+    // ---- 上一期发生了什么 ----
+    var prev = c.snaps.length > 1 ? c.snaps[c.snaps.length - 2] : null;
+    var d = prev ? Ledger.delta(c.snap, prev) : null;
+    if (d && d.change != null) {
+      w.appendChild(h('h2', {}, [
+        '上一期',
+        h('span', { class: 'n' }, [
+          prev.date.slice(5).replace('-', '/') + ' → ' + c.snap.date.slice(5).replace('-', '/'),
+        ]),
+      ]));
+      var dl = h('div', { class: 'list' });
+      // ⚠️ 分不出来的时候写「—」并说明为什么,**不拿总额倒推**。
+      //    倒推出来的曲线和真的长得一模一样,而你会拿它做决定。
+      dl.appendChild(statRow('市场涨跌', d.market,
+        d.market == null ? '要先记买卖才分得出来' : '钱自己赚的,不含你投进去的'));
+      dl.appendChild(statRow('工资 − 花费', d.inflow,
+        d.inflow == null ? '同上' : '这段时间净流入组合的钱'));
+      dl.appendChild(statRow('总额变化', d.change, '上面两项之和'));
+      w.appendChild(dl);
+      if (d.market == null) {
+        w.appendChild(h('div', { class: 'hint' }, [
+          '**记买卖就够了** —— 涨跌和投入是解出来的,一个数都不用手填。',
+        ]));
+      }
+    }
+
+    // ---- 入口 ----
+    w.appendChild(h('button', {
+      class: 'btn', style: 'margin-top:24px', onclick: function () { onEntry(); },
+    }, [c.stale ? '录 ' + monthLabel() + '的数字' : '再录一期']));
+    w.appendChild(h('button', {
+      class: 'btn ghost', style: 'margin-top:8px', onclick: recordOne,
+    }, ['记一笔买卖']));
+
+    // ⚠️ **方案屏必须留一个门。** 主界面不显示清单是你选的,
+    //    但没有入口的话,录入那一次看完就再也回不去了 ——
+    //    而清单是跨天的:今天买了黄金没买中短债,明天还得找得到它。
+    //    以前踩过一次「整页没有一处能点」,不能再踩第二次。
+    var open = Todos.open().length;
+    w.appendChild(h('button', {
+      class: 'link', style: 'margin-top:12px;display:block;width:100%',
+      onclick: function () { view = 'plan'; render(); },
+    }, [open ? '这个月该做什么 · 还欠 ' + open + ' 件 ›' : '这个月该做什么 ›']));
+  }
+
+  /** 一行数字 —— 正负用颜色区分,分不出来的写「—」。 */
+  function statRow(label, v, sub) {
+    return h('div', { class: 'list-row' }, [
+      h('div', { class: 'body' }, [
+        h('div', { class: 'ttl' }, [label]),
+        h('div', { class: 'sub2' }, [sub]),
+      ]),
+      h('div', {
+        class: 'amt' + (v == null ? ' dim' : v > 0 ? ' up' : v < 0 ? ' down' : ''),
+      }, [v == null ? '—' : (v > 0 ? '+' : '') + money(v)]),
+    ]);
   }
 
   function render() {
@@ -72,34 +243,14 @@ var NowUI = (function () {
     var extT = Assets.total(snap);
     var ext = extT.sum, extBlank = extT.blank;
 
-    // ---- 总额:这一页唯一的主视觉 ----
-    //
-    // ⚠️ 用 .hero 而不是 h1。别的页面的 h1 是「历史」「设置」这种路牌,
-    //    而这里是一个**要被读的数**。同一个样式扛两种角色,哪边都不出彩。
-    var hero = h('div', { class: 'hero' });
-    hero.appendChild(h('div', { class: 'hero-cap' }, ['总资产']));
-    hero.appendChild(h('div', { class: 'hero-num' }, ['¥' + money(sm.total + ext)]));
-    // ⚠️ 组合和组合外拆成两格,不再挤在一行灰字里 ——
-    //    「这两个加起来才是上面那个」这层关系,并排才读得出来。
-    //    组合外为 0 时整格不出现:一个写着 ¥0 的格子只会让人以为漏填了。
-    var split = h('div', { class: 'hero-split' });
-    split.appendChild(h('div', {}, [
-      h('span', { class: 'k' }, ['投资组合']),
-      h('span', { class: 'v' }, ['¥' + money(sm.total)]),
-    ]));
-    if (ext) {
-      split.appendChild(h('div', {}, [
-        h('span', { class: 'k' }, ['组合外']),
-        h('span', { class: 'v' }, ['¥' + money(ext)]),
-      ]));
-    }
-    hero.appendChild(split);
-    var sub = h('div', { class: 'hero-sub' });
-    sub.appendChild(h('span', { class: 'pill' + (stale ? ' warn' : '') }, [
-      snap.date.slice(5).replace('-', '/') + (age > 0 ? ' · ' + age + ' 天前' : ' · 今天'),
-    ]));
-    hero.appendChild(sub);
-    w.appendChild(hero);
+    // ---- 分派 ----
+    // 公共部分(总额、过期判断、组合外)算完之后再分岔 ——
+    // 两个视图都要用这几个数,各算一遍迟早会算出两个不一样的总额。
+    var ctx = { st: st, snaps: snaps, snap: snap, sm: sm, ext: ext,
+                extBlank: extBlank, age: age, stale: stale };
+    if (view === 'home') { renderHome(w, ctx); el.appendChild(w); return; }
+
+    w.appendChild(heroBlock(ctx, false));
 
     if (extBlank.length) {
       w.appendChild(h('div', {
@@ -313,10 +464,12 @@ var NowUI = (function () {
     //    于是刚录完的那 25 天里,想补一笔外部资产、想改抄错的数字,一个入口都没有。
     //    tools/view.js 打出「可点 0」才发现:整页没有一处能点。
     //    不过期的时候用次要样式,别跟「今天该买什么」抢注意力。
+    // ⚠️ 方案屏的出口是「知道了」,不是「再录一期」。
+    //    这一屏是**录完之后看的**,再摆一个录入按钮等于邀请你连录两期。
     body.appendChild(h('button', {
-      class: 'btn ghost', style: 'margin-top:20px',
-      onclick: function () { onEntry(); },
-    }, [stale ? '再录一期' : '录 ' + monthLabel() + '的数字']));
+      class: 'btn', style: 'margin-top:24px',
+      onclick: function () { view = 'home'; render(); },
+    }, ['知道了']));
 
     w.appendChild(body);
     el.appendChild(w);
@@ -504,7 +657,7 @@ var NowUI = (function () {
     render();
   }
 
-  return { mount: mount };
+  return { mount: mount, showPlan: showPlan };
 })();
 
 if (typeof module !== 'undefined') module.exports = NowUI;

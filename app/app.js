@@ -73,7 +73,16 @@
     // 录入是全屏接管 —— 抄数字的时候底下不该还挂着 tab 栏勾着你的注意力
     if (entering) {
       EntryUI.mount(page, {
-        onDone: function () { entering = false; render(); },
+        // ⚠️ **存成功就直接进方案屏**,不回主界面。
+        //    再平衡建议依附于「刚录完一期」这个事件 —— 那一刻你手里
+        //    正好有最新的数、也正好在想「那我该买什么」。
+        //    让人自己去点第二下的话,大部分时候就不点了。
+        //    取消(saved=false)不跳,那时候什么都没变。
+        onDone: function (saved) {
+          entering = false;
+          if (saved) { current = 'now'; NowUI.showPlan(); }
+          render();
+        },
       });
       root.appendChild(page);
       return;

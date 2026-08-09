@@ -596,6 +596,13 @@ input:focus, select:focus {
   display: flex; flex-wrap: wrap; align-items: center; gap: var(--s1) var(--s3);
   margin-top: var(--s3); font-size: var(--t-sm); color: var(--hero-dim);
 }
+/* 走势缩略线 —— 压在卡片右下角当背景。
+   ⚠️ pointer-events:none 是必须的:它盖在卡片上，不关掉的话
+      整张卡片的点击和长按都会被这层 SVG 吃掉。 */
+.hero-spark {
+  position: absolute; pointer-events: none;
+  right: 0; bottom: 0; width: 62%; height: 52px;
+}
 .hero .pill { background: rgba(255,255,255,.14); color: var(--hero-fg); }
 .hero .pill.warn { background: rgba(255,196,120,.2); color: #ffd9a3; }
 
@@ -641,6 +648,14 @@ h2 .n { color: var(--text-dim2); font-weight: 500; margin-left: var(--s1);
    光看长度分不出来 —— 而这两件事要采取的行动正好相反。
    ⚠️ 这里必须盖掉类别色,否则「超配」这个信号被色彩身份吃掉。 */
 .bar.over i { background: var(--warn); }
+
+/* 涨跌 —— **只在「上一期」那三个数上用**，不铺开到全应用。
+   ⚠️ 不用红涨绿跌也不用绿涨红跌：这两套习惯正好相反（A 股 vs 美股），
+      而这个人两边都在投。所以用中性的深浅：赚的用正文色加重，
+      亏的用暖色（和「超配」同一个暖色，都是「该看一眼」的意思）。 */
+.list-row .amt.up   { color: var(--text); }
+.list-row .amt.down { color: var(--warn); }
+.list-row .amt.dim  { color: var(--text-dim2); font-weight: 500; }
 
 /* 行首色点 —— 把条上的颜色和名字绑在一起。
    没有它的话,色条只是装饰;有了它,颜色才开始承载「这是哪一类」。 */

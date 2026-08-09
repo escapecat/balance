@@ -9,7 +9,7 @@
 <!-- 构建时间。⚠️ 由 tools/commit.sh 每次提交时自动盖章 ——
      手动维护的版本号漏更一次就再也没人信它了,而它存在的全部意义
      就是让你一眼确认「手机上跑的到底是不是我刚推的那版」。 -->
-<meta name="build" content="08-10 02:35">
+<meta name="build" content="08-10 02:43">
 
 <!-- 「添加到主屏幕」那一套。
      ⚠️ iOS **不读 manifest** 里的 display / icon,得单独给下面这几行,
@@ -22,7 +22,7 @@
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="icon" href="icon-192.png">
 
-<link rel="stylesheet" href="style.css?v=08100235">
+<link rel="stylesheet" href="style.css?v=08100243">
 </head>
 <body>
 
@@ -32,32 +32,32 @@
      而白屏在控制台之外没有任何提示。tools/check.sh 会验每个 src 真实存在。 -->
 
 <!-- 静态字典:不依赖任何东西,放最前 -->
-<script src="data/labels.js?v=08100235"></script>
-<script src="data/palette.js?v=08100235"></script>
+<script src="data/labels.js?v=08100243"></script>
+<script src="data/palette.js?v=08100243"></script>
 
 <!-- 存储:全项目唯一碰 localStorage 的文件 -->
-<script src="lib/store.js?v=08100235"></script>
-<script src="lib/sync.js?v=08100235"></script>
+<script src="lib/store.js?v=08100243"></script>
+<script src="lib/sync.js?v=08100243"></script>
 
 <!-- 核心:纯函数,零 DOM。node 里能直接 require 跑测试 -->
-<script src="core/portfolio.js?v=08100235"></script>
-<script src="core/actions.js?v=08100235"></script>
-<script src="core/ledger.js?v=08100235"></script>
-<script src="core/config.js?v=08100235"></script>
-<script src="core/assets.js?v=08100235"></script>
-<script src="core/allocate.js?v=08100235"></script>
-<script src="core/todos.js?v=08100235"></script>
-<script src="core/stats.js?v=08100235"></script>
+<script src="core/portfolio.js?v=08100243"></script>
+<script src="core/actions.js?v=08100243"></script>
+<script src="core/ledger.js?v=08100243"></script>
+<script src="core/config.js?v=08100243"></script>
+<script src="core/assets.js?v=08100243"></script>
+<script src="core/allocate.js?v=08100243"></script>
+<script src="core/todos.js?v=08100243"></script>
+<script src="core/stats.js?v=08100243"></script>
 
 <!-- 展示层:只渲染和绑事件,不写存储 -->
-<script src="ui/dom.js?v=08100235"></script>
-<script src="ui/modal.js?v=08100235"></script>
-<script src="ui/entry.js?v=08100235"></script>
-<script src="ui/now.js?v=08100235"></script>
-<script src="ui/history.js?v=08100235"></script>
-<script src="ui/stats.js?v=08100235"></script>
-<script src="ui/settings.js?v=08100235"></script>
+<script src="ui/dom.js?v=08100243"></script>
+<script src="ui/modal.js?v=08100243"></script>
+<script src="ui/entry.js?v=08100243"></script>
+<script src="ui/now.js?v=08100243"></script>
+<script src="ui/history.js?v=08100243"></script>
+<script src="ui/stats.js?v=08100243"></script>
+<script src="ui/settings.js?v=08100243"></script>
 
-<script src="app.js?v=08100235"></script>
+<script src="app.js?v=08100243"></script>
 </body>
 </html>

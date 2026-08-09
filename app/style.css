@@ -419,9 +419,17 @@ input:focus, select:focus {
   border-top: 1px solid var(--border);
   padding-bottom: env(safe-area-inset-bottom);
 }
+/* ⚠️ **毛玻璃只在「内容能滑到它后面」时才成立。**
+   早先这里是 86% 不透明 + backdrop-filter：内容长的页面(设置)底下压着
+   基金列表，看着是满的；而内容短的页面(历史)后面什么都没有，
+   那 14% 就透出页面底色 —— 在 iPhone 底部安全区那一条上尤其明显，
+   看起来就是「tab 栏没贴到底，下面空了一块黑」。
+   同一个组件在两个页面上长得不一样，差别只来自它背后有没有东西。
+
+   ⚠️ 保留 backdrop-filter(内容滑过时仍有质感)，但**底色必须不透明**。
+      半透明省下的那点通透，换来的是一条随页面内容变化的黑边。 */
 @supports (backdrop-filter: blur(1px)) {
-  .tabbar { background: color-mix(in srgb, var(--surface) 86%, transparent);
-            backdrop-filter: saturate(180%) blur(12px); }
+  .tabbar { backdrop-filter: saturate(180%) blur(12px); }
 }
 .tabbar button {
   flex: 1; min-height: 52px; padding: var(--s2) var(--s1);

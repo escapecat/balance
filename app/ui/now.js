@@ -403,8 +403,11 @@ var NowUI = (function () {
     if (acts.length) {
       var nb = 0;
       acts.forEach(function (a) { nb += (a.kind === 'sell' ? -1 : 1) * a.amount; });
+      // ⚠️ 标题说「已经做了」,不能只叫「这一期记的买卖」——
+      //    这一屏叫「该做什么」,里面冒出一份买卖清单,
+      //    第一眼分不清是「建议你买」还是「你买过了」。
       body.appendChild(h('h2', {}, [
-        '这一期记的买卖',
+        '已经做了',
         h('span', { class: 'n' }, [acts.length + ' 笔 · 净买入 ¥' + money(nb)]),
       ]));
       var al = h('div', { class: 'list' });
@@ -642,8 +645,29 @@ var NowUI = (function () {
           type: 'number', suffix: '元',
         }).then(function (v) {
           if (v == null || v === '') return;
+          var amt = parseFloat(v);
+
+          // ⚠️ **先看清单上有没有这一条。**
+          //    早先这里一律 Actions.add,和「勾掉待办」是两条互不知情的路径:
+          //    你照着清单买了黄金、回来点「记一笔买卖」记下来,结果
+          //    清单上那条还挂着「买 黄金 四万五」(以为你没做),
+          //    下面又多一条「买 黄金 四万五」——
+          //    **一个说没做,一个说做了**,而它们说的是同一件事。
+          //
+          //    Todos.complete 内部会写流水,所以认领之后**不能再 add 一次**,
+          //    否则一笔买入记两条,净买入翻倍,「市场涨跌」跟着错。
+          var hit = Todos.open().filter(function (t) {
+            return t.code === f.code && t.kind === kind;
+          })[0];
+          if (hit) {
+            var r0 = Todos.complete(hit.id, amt, today());
+            if (!r0.ok) { Modal.note({ title: '记不下来', body: r0.why }); return; }
+            render();
+            return;
+          }
+
           var r = Actions.add({ date: today(), kind: kind, code: f.code,
-                                category: f.category, amount: parseFloat(v) });
+                                category: f.category, amount: amt });
           if (!r.ok) { Modal.note({ title: '记不下来', body: r.why }); return; }
           render();
         });

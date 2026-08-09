@@ -1,0 +1,471 @@
+/* ============================================================
+   设计令牌
+   ============================================================
+   ⚠️ 颜色只能引用 var(--x),组件里出现字面 #rrggbb 就是 bug
+      (DESIGN.md 第九节点名的坑:深色模式第一天就得规划)。
+
+   ⚠️ 间距同理,而且这条**是补出来的**:改版前全靠内联样式硬编码,
+      6 个 ui 文件 ~150 处,用了 17 种不同的值 ——
+      1 2 3 4 5 6 7 8 9 10 11 12 14 16 26px。
+      「有的间隔有问题」不是某一处坏了,是**根本没有间距系统**:
+      同样是「标题和正文之间」,这儿 6px 那儿 8px 再那儿 10px,
+      眼睛看得出来但说不上哪儿不对 —— 这正是最难查的一类不一致。
+      现在统一到 4px 网格,只有 6 档;不够用时该反思层级,而不是加档。 */
+:root {
+  /* 间距 —— 4px 网格 */
+  --s1: 4px;    /* 贴着的两样东西:徽章和文字 */
+  --s2: 8px;    /* 同一组内部:标签和输入框 */
+  --s3: 12px;   /* 卡片内部的段落之间 */
+  --s4: 16px;   /* 卡片之间、页面内边距 */
+  --s5: 24px;   /* 分区之间 */
+  --s6: 32px;   /* 大分区 */
+
+  /* 字号 —— 每档差 2-3px,再密就分不出层级了 */
+  --t-xs:   12px;   /* 补充说明 */
+  --t-sm:   13px;   /* 次要信息 */
+  --t-base: 15px;   /* 正文 */
+  --t-md:   17px;   /* 小标题 */
+  --t-lg:   20px;   /* 页面标题 */
+  --t-xl:   26px;   /* 数字 —— 一眼要看到的那种 */
+
+  /* 圆角 */
+  --r-sm:   8px;
+  --r-md:   12px;
+  --r-lg:   18px;
+  --r-full: 999px;
+
+  /* 最小可点区域。⚠️ 44px 不是审美是**可用性下限** ——
+     改版前 .chips 只有 33px 高,手机上一按一个不准。 */
+  --tap: 44px;
+
+  --bg:        #f5f6f8;
+  --surface:   #ffffff;
+  --surface-2: #eef0f4;
+  --surface-3: #e4e7ec;
+  --border:    #e2e5ea;
+  --border-2:  #cfd4dc;
+  --text:      #16181d;
+  --text-dim:  #656c78;
+  --text-dim2: #8b929e;
+  --accent:    #1d3f63;      /* 主色:深蓝。钱的事不用高饱和,也不该是绿的 */
+  --accent-2:  #16334f;
+  --accent-dim:#e7eef6;
+  --warn:      #a25a09;
+  --warn-dim:  #fdf3e3;
+  --danger:    #b42318;
+  --danger-dim:#fdeceb;
+  --on-accent: #ffffff;      /* 主色上的文字 —— 深色模式要跟着翻 */
+
+  /* 阴影两档:平时几乎看不见,浮起来的才明显 */
+  --shadow:   0 1px 2px rgba(16,24,40,.04), 0 1px 3px rgba(16,24,40,.06);
+  --shadow-2: 0 4px 6px -2px rgba(16,24,40,.03), 0 12px 16px -4px rgba(16,24,40,.08);
+
+  --ease: cubic-bezier(.2, .8, .3, 1);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg:        #131519;
+    --surface:   #1c1f25;
+    --surface-2: #262a31;
+    --surface-3: #31363f;
+    --border:    #2e333b;
+    --border-2:  #3d434d;
+    --text:      #e9ebef;
+    --text-dim:  #9aa1ac;
+    --text-dim2: #757c88;
+    --accent:    #7fb0e0;
+    --accent-2:  #a3c8ec;
+    --accent-dim:#16232f;
+    --warn:      #e0a355;
+    --warn-dim:  #2f2718;
+    --danger:    #f07167;
+    --danger-dim:#38201e;
+    /* ⚠️ 深色模式下主色是浅蓝,白字压上去几乎看不清 —— 得用深色文字。
+       写死 #fff 的话深色模式的主按钮一直是低对比度。 */
+    --on-accent: #0d1a26;
+    --shadow:    0 1px 2px rgba(0,0,0,.4);
+    --shadow-2:  0 12px 24px rgba(0,0,0,.45);
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 0 0 calc(64px + env(safe-area-inset-bottom));
+  background: var(--bg);
+  color: var(--text);
+  font: var(--t-base)/1.6 system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.wrap { max-width: 560px; margin: 0 auto; padding: var(--s4); }
+
+h1 { font-size: var(--t-lg); font-weight: 650; margin: var(--s1) 0 var(--s1);
+     letter-spacing: -.01em; }
+h2 { font-size: var(--t-md); font-weight: 620; margin: var(--s5) 0 var(--s3);
+     letter-spacing: -.005em; }
+.sub { color: var(--text-dim); font-size: var(--t-sm); margin: 0 0 var(--s5); }
+
+/* ---- 卡片 ---- */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: var(--s4);
+  margin-bottom: var(--s3);
+  box-shadow: var(--shadow);
+}
+.card:last-child { margin-bottom: 0; }
+
+/* 可点的卡片要有反馈,否则看不出哪些能点 */
+.card.tappable { cursor: pointer;
+                 transition: border-color .15s var(--ease),
+                             box-shadow .15s var(--ease),
+                             transform .1s var(--ease); }
+.card.tappable:hover  { border-color: var(--border-2); box-shadow: var(--shadow-2); }
+.card.tappable:active { transform: scale(.994); }
+
+.row { margin-bottom: var(--s4); }
+.row:last-child { margin-bottom: 0; }
+
+label.lab { display: block; font-size: var(--t-sm); color: var(--text-dim);
+            margin-bottom: var(--s2); font-weight: 500; }
+
+/* ---- 输入 ---- */
+input[type=number], input[type=text], input[type=date], select {
+  width: 100%; min-height: var(--tap); padding: var(--s2) var(--s3);
+  background: var(--surface); color: var(--text);
+  border: 1px solid var(--border-2); border-radius: var(--r-sm);
+  font: inherit; font-size: var(--t-base);
+  transition: border-color .15s var(--ease), box-shadow .15s var(--ease);
+}
+input::placeholder { color: var(--text-dim2); }
+input:focus, select:focus {
+  outline: none; border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-dim);
+}
+
+/* ---- 分段选择器 ---- */
+.seg { display: flex; gap: var(--s2); flex-wrap: wrap; }
+.seg button {
+  flex: 1 1 auto; min-width: 64px; min-height: var(--tap); padding: var(--s2) var(--s3);
+  background: var(--surface-2); color: var(--text);
+  border: 1px solid transparent; border-radius: var(--r-sm);
+  font: inherit; cursor: pointer;
+  transition: background .15s var(--ease), color .15s var(--ease),
+              border-color .15s var(--ease), transform .1s var(--ease);
+}
+.seg button:hover  { background: var(--surface-3); }
+.seg button:active { transform: scale(.97); }
+.seg button[aria-pressed="true"] {
+  background: var(--accent-dim); border-color: var(--accent); color: var(--accent);
+  font-weight: 600;
+}
+
+/* ---- 标签片(可点) ---- */
+.chips { display: flex; gap: var(--s2); flex-wrap: wrap; }
+.chips button {
+  /* ⚠️ 高度靠 min-height 保证 44px,不靠 padding 撑 ——
+     padding 撑出来的高度会随字号变,改一次字号就又不够点了。 */
+  display: inline-flex; align-items: center;
+  min-height: var(--tap); padding: 0 var(--s3);
+  border-radius: var(--r-full);
+  background: var(--surface-2); color: var(--text-dim);
+  border: 1px solid transparent; font: inherit; font-size: var(--t-sm);
+  cursor: pointer;
+  transition: background .15s var(--ease), color .15s var(--ease),
+              border-color .15s var(--ease), transform .1s var(--ease);
+}
+.chips button:hover  { background: var(--surface-3); color: var(--text); }
+.chips button:active { transform: scale(.96); }
+.chips button[aria-pressed="true"] {
+  background: var(--accent-dim); border-color: var(--accent);
+  color: var(--accent); font-weight: 600;
+}
+
+/* 纯展示的小标签(食材、属性)—— 不可点,所以不受 44px 约束 */
+.tag {
+  display: inline-flex; align-items: center; gap: var(--s1);
+  padding: 3px var(--s2); border-radius: var(--r-full);
+  background: var(--surface-2); color: var(--text-dim);
+  font-size: var(--t-xs); line-height: 1.5; white-space: nowrap;
+}
+.tag.strong { background: var(--accent-dim); color: var(--accent); font-weight: 600; }
+.tag.warn   { background: var(--warn-dim);   color: var(--warn); }
+
+/* ---- 按钮 ---- */
+.btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 100%; min-height: 48px; padding: var(--s3) var(--s4);
+  background: var(--accent); color: var(--on-accent);
+  border: 1px solid transparent; border-radius: var(--r-md);
+  font: inherit; font-size: var(--t-md); font-weight: 600; cursor: pointer;
+  transition: background .15s var(--ease), transform .1s var(--ease),
+              box-shadow .15s var(--ease);
+}
+.btn:hover:not(:disabled)  { background: var(--accent-2); }
+.btn:active:not(:disabled) { transform: scale(.985); }
+.btn:disabled { opacity: .4; cursor: not-allowed; }
+.btn.ghost {
+  background: var(--surface); color: var(--text); border-color: var(--border-2);
+}
+.btn.ghost:hover:not(:disabled) { background: var(--surface-2); }
+.btn.danger { background: var(--danger); color: #fff; }
+.btn.sm { min-height: var(--tap); font-size: var(--t-base); }
+
+/* 三级操作:取消 / 删除 / 重新生成 这类。
+   ⚠️ 之前这一级是每处自己写一串内联样式(background:none;border:0;
+      text-decoration:underline;…),等于第四种按钮风格,而且各写各的。
+      一屏里同时出现「绿实心 / 白描边 / 红下划线」三种权重才叫层级;
+      三个都做成整宽大按钮堆着,等于没有层级 —— 你不知道该点哪个。 */
+.link { background: none; border: 0; padding: var(--s2) var(--s3);
+        font: inherit; font-size: var(--t-xs); cursor: pointer;
+        color: var(--text-dim); text-decoration: underline;
+        text-underline-offset: 2px; }
+.link:hover  { color: var(--text); }
+.link.danger { color: var(--danger); }
+
+/* 并排按钮 —— 改版前每处自己写 display:flex;gap:8px */
+.btn-row { display: flex; gap: var(--s2); }
+.btn-row .btn { width: auto; flex: 1; }
+
+/* ---- 弹层 ----
+   替掉 prompt / confirm / alert:系统弹窗不认 --bg,深色模式下白花花一片,
+   而且各平台各长各的样。手机上从底部升起(拇指够得着),宽屏居中。 */
+.modal-mask {
+  position: fixed; inset: 0; z-index: 100;
+  background: rgba(9, 12, 18, .45);
+  display: flex; align-items: flex-end; justify-content: center;
+  animation: modal-fade .16s var(--ease);
+  backdrop-filter: blur(2px);
+}
+/* ⚠️ pointer-events:none 不能少。淡出这 140ms 里它**还在 DOM 里**,
+   不挡掉的话正在消失的那一层会把你紧接着的那一下点击吃掉 ——
+   表现成「点了没反应」,而且只在手快的时候出现,最难查的那种。 */
+.modal-mask.closing { animation: modal-fade .14s var(--ease) reverse; pointer-events: none; }
+@keyframes modal-fade { from { opacity: 0 } to { opacity: 1 } }
+
+.modal-sheet {
+  width: 100%; max-width: 460px;
+  background: var(--surface); color: var(--text);
+  border-radius: var(--r-lg) var(--r-lg) 0 0;
+  padding: var(--s5) var(--s4) calc(var(--s4) + env(safe-area-inset-bottom));
+  box-shadow: 0 -8px 32px rgba(9, 12, 18, .22);
+  max-height: 86vh; overflow-y: auto;
+  animation: modal-rise .22s var(--ease);
+}
+@keyframes modal-rise { from { transform: translateY(16px) } to { transform: none } }
+.modal-mask.closing .modal-sheet { animation: none; }
+
+/* 手机上从底部升起时给个抓手,一眼看出是可以关掉的一层 */
+.modal-sheet::before {
+  content: ''; display: block; width: 36px; height: 4px;
+  margin: calc(var(--s2) * -1) auto var(--s4);
+  border-radius: var(--r-full); background: var(--border-2);
+}
+
+@media (min-width: 560px) {
+  .modal-mask { align-items: center; }
+  .modal-sheet { border-radius: var(--r-md); }
+  .modal-sheet::before { display: none; }
+}
+
+.modal-title { font-size: var(--t-md); font-weight: 620; margin-bottom: var(--s1);
+               letter-spacing: -.005em; }
+.modal-hint  { font-size: var(--t-sm); color: var(--text-dim); margin-bottom: var(--s4);
+               line-height: 1.55; white-space: pre-line; }   /* 多行说明按换行符断行 */
+
+/* 选择题:一个动作一个按钮。改版前是 prompt 里让人输数字选菜单项。 */
+.modal-opts { display: flex; flex-direction: column; gap: var(--s2); margin-top: var(--s1); }
+.modal-opt {
+  text-align: left; width: 100%; min-height: var(--tap); padding: var(--s3) var(--s4);
+  background: var(--surface-2); color: var(--text);
+  border: 1px solid transparent; border-radius: var(--r-sm);
+  font: inherit; cursor: pointer;
+  transition: background .15s var(--ease), border-color .15s var(--ease),
+              transform .1s var(--ease);
+}
+.modal-opt:hover  { border-color: var(--accent); background: var(--accent-dim); }
+.modal-opt:active { transform: scale(.985); }
+.modal-opt.danger { color: var(--danger); }
+.modal-opt.danger:hover { border-color: var(--danger); background: var(--danger-dim); }
+.modal-opt-label { font-size: var(--t-base); font-weight: 500; }
+.modal-opt-hint  { font-size: var(--t-xs); color: var(--text-dim); margin-top: 2px;
+                   line-height: 1.5; }
+
+.hint { font-size: var(--t-xs); color: var(--text-dim); margin-top: var(--s2);
+        line-height: 1.55; }
+
+.note { border-left: 3px solid var(--accent); background: var(--accent-dim);
+        padding: var(--s3) var(--s4); border-radius: 0 var(--r-sm) var(--r-sm) 0;
+        font-size: var(--t-sm); line-height: 1.6; }
+.note.warn   { border-color: var(--warn);   background: var(--warn-dim);   color: var(--warn); }
+.note.danger { border-color: var(--danger); background: var(--danger-dim); color: var(--danger); }
+
+/* 可信度徽章 —— 数据准不准要一眼看见,这是这个库最需要暴露的东西 */
+.conf { display: inline-block; padding: 1px var(--s1); border-radius: var(--s1);
+        font-size: 11px; font-weight: 700; vertical-align: middle; }
+.conf-A { background: var(--accent-dim); color: var(--accent); }
+.conf-B { background: var(--surface-2);  color: var(--text-dim); }
+.conf-C { background: var(--warn-dim);   color: var(--warn); }
+.conf-U { background: var(--danger-dim); color: var(--danger); }
+
+/* 状态徽章。
+   ⚠️ 和 .conf 分开 —— .conf 说的是「这条数据准不准」(A/B/C/U),
+      是这个库最需要暴露的东西。轮次状态(待采购 / 进行中 / 已完成)
+      跟数据准不准毫无关系,原来却借用了 .conf-A/.conf-B ——
+      于是「进行中」被渲染成一个「数据可信度 B 级」的徽章。
+      同一个视觉符号表示两件无关的事,是这类组件最容易烂掉的方式。 */
+.st { display: inline-block; padding: 2px var(--s2); border-radius: var(--r-full);
+      font-size: var(--t-xs); font-weight: 600; line-height: 1.5;
+      background: var(--surface-2); color: var(--text-dim); }
+.st.live { background: var(--accent-dim); color: var(--accent); }
+.st.done { background: var(--surface-2);  color: var(--text-dim2); }
+
+/* ---- 底部标签栏 ---- */
+.tabbar {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
+  display: flex; background: var(--surface);
+  border-top: 1px solid var(--border);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+@supports (backdrop-filter: blur(1px)) {
+  .tabbar { background: color-mix(in srgb, var(--surface) 86%, transparent);
+            backdrop-filter: saturate(180%) blur(12px); }
+}
+.tabbar button {
+  flex: 1; min-height: 52px; padding: var(--s2) var(--s1);
+  background: none; border: 0;
+  color: var(--text-dim); font: inherit; font-size: 11px; cursor: pointer;
+  transition: color .15s var(--ease);
+}
+.tabbar button:active { color: var(--text); }
+.tabbar button[aria-current="page"] { color: var(--accent); font-weight: 600; }
+.tabbar .ic { display: block; font-size: 19px; line-height: 1.35; }
+
+.empty { text-align: center; color: var(--text-dim); padding: var(--s6) var(--s5); }
+.empty .big { font-size: var(--t-xl); margin-bottom: var(--s2); opacity: .7; }
+
+/* ---- 列表 ----
+   ⚠️ 采购清单原来是**每样食材一张 .card** —— 8 样就是 8 个带边框和阴影的盒子,
+      一屏 246 个节点。清单是清单,不是 8 张卡片:同一组东西应该在**一个**
+      容器里用细线分隔,而不是每条都自带一副边框。
+      站在货架前要的是「一眼扫完还剩什么」,不是欣赏 8 个圆角矩形。 */
+.list { background: var(--surface); border: 1px solid var(--border);
+        border-radius: var(--r-md); box-shadow: var(--shadow); }
+/* ⚠️ 这里**不能用 overflow:hidden** 去裁圆角 —— 它会让内部的
+   `position: sticky` 失效(吸顶的分组标题就不吸了)。
+   改成给首尾两行各自加圆角。 */
+.list > :first-child { border-top-left-radius: var(--r-md);
+                       border-top-right-radius: var(--r-md); }
+.list > :last-child  { border-bottom-left-radius: var(--r-md);
+                       border-bottom-right-radius: var(--r-md); }
+.list-row {
+  display: flex; align-items: center; gap: var(--s3);
+  width: 100%; min-height: 52px; padding: var(--s3) var(--s4);
+  background: none; border: 0; border-top: 1px solid var(--border);
+  color: var(--text); font: inherit; text-align: left; cursor: pointer;
+  transition: background .12s var(--ease);
+}
+.list-row:first-child { border-top: 0; }
+.list-row:hover  { background: var(--surface-2); }
+.list-row:active { background: var(--surface-3); }
+.list-row .body { flex: 1; min-width: 0; }
+.list-row .ttl  { font-weight: 550; }
+.list-row .sub2 { font-size: var(--t-xs); color: var(--text-dim); margin-top: 1px; }
+/* 「买到了 / 做完了」—— 划掉、淡出,让路给还没做的 */
+.list-row.done  { opacity: .45; }
+.list-row.done .ttl { text-decoration: line-through; }
+
+/* ⚠️ 「我有这样东西」**不能用 .done**。
+   .done 是「划掉」的语义(半透明 + 删除线),而「柜子里有盐」是个
+   **正面状态** —— 划掉它等于说「这条完事了,别看了」,正好反过来:
+   有的那些才是你要一眼看到的,没有的才该退让。 */
+.list-row.on .ttl { font-weight: 600; }
+.list-row:not(.on) .ttl { color: var(--text-dim); }
+
+/* 勾选框:视觉上是个框,但**整行**才是点击区 ——
+   改版前只有 18px 的 ☐ 能点,手机上按不准(储物柜那次已经踩过一模一样的坑)。 */
+.ck { flex: 0 0 auto; width: 22px; height: 22px; border-radius: 6px;
+      border: 1.5px solid var(--border-2); display: flex; align-items: center;
+      justify-content: center; font-size: 14px; color: transparent;
+      transition: background .12s var(--ease), border-color .12s var(--ease); }
+.list-row.done .ck, .list-row.on .ck { background: var(--accent);
+                     border-color: var(--accent); color: var(--on-accent); }
+
+/* 行尾的小动作(改规格之类)。⚠️ 不用 .btn ——
+   一行一个实心按钮,8 行就是 8 个按钮在跟主操作(勾掉)抢注意力。 */
+/* ⚠️ 行内次操作也得点得着。整行是 52px,竖着够了;横着只有两个字宽,
+   所以给 min-width/min-height —— 「次要」是视觉上退让,不是让它变得难点。 */
+.act { flex: 0 0 auto; min-height: 36px; min-width: 44px;
+       display: inline-flex; align-items: center; justify-content: center;
+       padding: var(--s1) var(--s2); border-radius: var(--r-sm);
+       background: none; border: 1px solid var(--border); color: var(--text-dim);
+       font: inherit; font-size: var(--t-xs); cursor: pointer;
+       transition: border-color .12s var(--ease), color .12s var(--ease); }
+.act:hover { border-color: var(--accent); color: var(--accent); }
+.act.warn  { border-color: var(--warn); color: var(--warn); }
+
+/* 分区标题吸顶。
+   ⚠️ 手机上最难受的一件事:点开一个分区,内容比屏幕长十几倍,
+      划到一半想收起来 —— 而那个开关早飞到屏幕外面去了,得一路划回顶上。
+      实测最大的菜系分组 121 道菜 ≈ **16 屏**;做菜那屏四张菜卡 ≈ 10 屏。
+      标题吸在顶上,划到哪儿都能收,也随时知道自己在哪一段里。
+   ⚠️ top 不是 0:标题栏本身有 1px 边框,贴死了会露出下面内容的一条边。 */
+.sticky { position: sticky; top: -1px; z-index: 5;
+          background: var(--surface); }
+/* 吸住之后给一道分隔线,否则它和下面的内容糊在一起看不出层次 */
+.sticky.stuck, .list-row.sticky { box-shadow: 0 1px 0 var(--border); }
+
+/* 进度条 —— 「还有 8 样没勾」这种话应该看得见,不是读出来的 */
+.prog { height: 4px; border-radius: var(--r-full); background: var(--surface-3);
+        overflow: hidden; }
+.prog > i { display: block; height: 100%; background: var(--accent);
+            transition: width .3s var(--ease); }
+
+/* ---- 间距工具类 ---- */
+   ⚠️ 加这几个是为了**让内联样式有地方可去**。改版前 ~150 处内联
+      margin/padding 各写各的,新代码只要抄一眼旁边就继续歪下去。
+      有了这几个类,「上面留一档」写 .mt-3,而不是随手来个 10px。 */
+.mt-1 { margin-top: var(--s1) } .mt-2 { margin-top: var(--s2) }
+.mt-3 { margin-top: var(--s3) } .mt-4 { margin-top: var(--s4) }
+.mt-5 { margin-top: var(--s5) }
+.mb-1 { margin-bottom: var(--s1) } .mb-2 { margin-bottom: var(--s2) }
+.mb-3 { margin-bottom: var(--s3) } .mb-4 { margin-bottom: var(--s4) }
+.flex      { display: flex; gap: var(--s2) }
+.flex-wrap { display: flex; gap: var(--s2); flex-wrap: wrap }
+.between   { display: flex; gap: var(--s2); align-items: center;
+             justify-content: space-between }
+.dim  { color: var(--text-dim) }
+.xs   { font-size: var(--t-xs) }
+.sm-t { font-size: var(--t-sm) }
+.num  { font-size: var(--t-xl); font-weight: 650; letter-spacing: -.02em;
+        font-variant-numeric: tabular-nums; }
+
+/* ---- Balance 专属 ---- */
+
+/* 分组小标题 —— 比 h2 轻,比 hint 重。录入页一屏十几组,用 h2 会把页面切碎 */
+.sec-h { font-size: var(--t-sm); font-weight: 600; color: var(--text-dim);
+         margin: var(--s5) 0 var(--s2); letter-spacing: .02em; }
+
+/* 实时 delta 里的异常标记 —— 单项变动超过一半多半是抄串行或少打一位 */
+.warn-text { color: var(--warn); }
+
+/* 数字一律等宽 —— 金额右对齐之后,不等宽的话每行都在轻微抖动,
+   而对账时你是竖着扫这一列的 */
+.num, input[inputmode="decimal"], .money {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+/* 配置条 —— 目标 vs 实际。用两层叠加而不是两根条:
+   两根条要读两遍才知道差多少,叠加一眼就看出来 */
+.bar { position: relative; height: 8px; border-radius: var(--r-full);
+       background: var(--surface-3); overflow: hidden; margin-top: var(--s1); }
+.bar i { position: absolute; inset: 0 auto 0 0; background: var(--accent);
+         border-radius: var(--r-full); }
+.bar u { position: absolute; top: -2px; bottom: -2px; width: 2px;
+         background: var(--text-dim); text-decoration: none; }

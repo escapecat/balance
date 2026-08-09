@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>Balance</title>
+
+<!-- 「添加到主屏幕」那一套。
+     ⚠️ iOS **不读 manifest** 里的 display / icon,得单独给下面这几行,
+        少了就会:图标变成页面截图、打开时顶上还挂着地址栏。 -->
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#1d3f63">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Balance">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" href="icon-192.png">
+
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="app"></div>
+
+<!-- ⚠️ 加载顺序 = 依赖顺序。core 之间靠全局变量互相找,顺序错了就是白屏,
+     而白屏在控制台之外没有任何提示。tools/check.sh 会验每个 src 真实存在。 -->
+
+<!-- 静态字典:不依赖任何东西,放最前 -->
+<script src="data/labels.js"></script>
+
+<!-- 存储:全项目唯一碰 localStorage 的文件 -->
+<script src="lib/store.js"></script>
+
+<!-- 核心:纯函数,零 DOM。node 里能直接 require 跑测试 -->
+<script src="core/portfolio.js"></script>
+<script src="core/ledger.js"></script>
+<script src="core/config.js"></script>
+<script src="core/assets.js"></script>
+<script src="core/allocate.js"></script>
+<script src="core/todos.js"></script>
+
+<!-- 展示层:只渲染和绑事件,不写存储 -->
+<script src="ui/dom.js"></script>
+<script src="ui/modal.js"></script>
+<script src="ui/entry.js"></script>
+<script src="ui/now.js"></script>
+<script src="ui/history.js"></script>
+<script src="ui/settings.js"></script>
+
+<script src="app.js"></script>
+</body>
+</html>

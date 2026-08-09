@@ -1,0 +1,187 @@
+// 开机冒烟 —— **白屏是最糟的一种故障:功能全在,你什么都看不见。**
+//
+// ⚠️ `node --check` 只查语法。少一个全局、加载顺序反了、某个函数名打错 ——
+//    语法全都合法,check.sh 全绿,可页面一片空白,而且控制台之外没有任何提示。
+//
+// ⚠️ 所以这里按 index.html 的**真实顺序**把所有脚本跑一遍,再挨个挂载页面。
+//    用最小 DOM 桩,不引 jsdom(零依赖是硬要求)。
+//
+// ⚠️ 还要**塞真实数据进去再挂一次**:空数据能挂上不代表有数据时能挂上,
+//    而有数据的那条路才是你天天走的。
+
+var path = require('path');
+var fs = require('fs');
+var vm = require('vm');
+var APP = path.join(__dirname, '..', '..', 'app');
+
+function El(tag) {
+  this.tagName = String(tag).toUpperCase();
+  this.children = []; this.attrs = {}; this.handlers = {};
+  this.className = ''; this.style = {}; this.value = ''; this.text = '';
+}
+Object.defineProperty(El.prototype, 'innerHTML',
+  { get: function () { return ''; }, set: function () { this.children = []; } });
+Object.defineProperty(El.prototype, 'textContent',
+  { get: function () { return this.text; },
+    set: function (v) { this.text = v; this.children = []; } });
+El.prototype.appendChild = function (c) { c.parentNode = this; this.children.push(c); return c; };
+El.prototype.removeChild = function (c) {
+  this.children = this.children.filter(function (x) { return x !== c; });
+};
+El.prototype.setAttribute = function (k, v) { this.attrs[k] = v; };
+El.prototype.getAttribute = function (k) { return this.attrs[k]; };
+El.prototype.addEventListener = function (k, f) { (this.handlers[k] = this.handlers[k] || []).push(f); };
+El.prototype.removeEventListener = function () {};
+El.prototype.focus = function () {}; El.prototype.select = function () {};
+El.prototype.setSelectionRange = function () {};
+El.prototype.all = function (out) {
+  out = out || [];
+  this.children.forEach(function (c) { out.push(c); c.all(out); });
+  return out;
+};
+El.prototype.querySelector = function (sel) {
+  var want = sel.replace(/^#/, ''), byId = sel[0] === '#';
+  return this.all().filter(function (c) {
+    return byId ? c.attrs.id === want : c.tagName === sel.toUpperCase();
+  })[0] || null;
+};
+
+// ⚠️ 前缀必须和 lib/store.js 里的一致。写错的话夹具全塞进了一个线上永远读不到
+//    的命名空间 —— 页面拿到的是空数据,而测试「有内容」的断言照样能过。
+//    这个坑在另一个项目里真发生过,整套页面测试空跑了一段时间。
+var mem = {}, NS = 'balance:';
+var body = new El('body'), appDiv = new El('div');
+appDiv.attrs.id = 'app'; body.appendChild(appDiv);
+var sandbox = {
+  document: {
+    body: body, documentElement: new El('html'), activeElement: null,
+    createElement: function (t) { return new El(t); },
+    createTextNode: function (t) { var n = new El('#text'); n.text = t; return n; },
+    createDocumentFragment: function () { return new El('#frag'); },
+    getElementById: function (id) { return id === 'app' ? appDiv : null; },
+    querySelector: function (s) { return body.querySelector(s); },
+    addEventListener: function () {}, removeEventListener: function () {},
+  },
+  console: console, setTimeout: setTimeout, clearTimeout: clearTimeout,
+  Promise: Promise, Date: Date, Math: Math, JSON: JSON, Object: Object, Array: Array,
+  String: String, Number: Number, isNaN: isNaN, parseInt: parseInt, parseFloat: parseFloat,
+  RegExp: RegExp, Error: Error, encodeURIComponent: encodeURIComponent,
+  localStorage: {
+    getItem: function (k) { return mem[k] === undefined ? null : mem[k]; },
+    setItem: function (k, v) { mem[k] = String(v); },
+    removeItem: function (k) { delete mem[k]; },
+    key: function (i) { return Object.keys(mem)[i] || null; },
+    get length() { return Object.keys(mem).length; },
+  },
+  location: { reload: function () {} },
+};
+sandbox.window = sandbox; sandbox.globalThis = sandbox;
+mem[NS + 'profile'] = JSON.stringify({ sex: 'male', age: 30, heightCm: 175,
+                                       activity: 'light', goal: 'cut', breakfast: 'light' });
+mem[NS + 'weightLog'] = JSON.stringify([{ date: '2026-01-01T00:00:00.000Z', kg: 70 }]);
+mem[NS + 'config'] = JSON.stringify({ equipment: ['炒锅', '空气炸锅', '电饭煲'], maxSpicy: 1,
+                                      maxActiveMinutes: 45, maxDifficulty: 3, maxIdleWait: 60,
+                                      allowOvernight: false, blacklist: [] });
+mem[NS + 'staples'] = JSON.stringify(['salt', 'cooking_oil', 'light_soy_sauce', 'rice']
+                                     .map(function (id) { return { id: id }; }));
+mem[NS + 'staplesMigrated'] = 'true';
+mem[NS + 'staplesConfirmed'] = 'true';
+
+var ctx = vm.createContext(sandbox);
+fs.readFileSync(path.join(APP, 'index.html'), 'utf8')
+  .replace(/src="([^"]+\.js)"/g, function (_, f) {
+    vm.runInContext(fs.readFileSync(path.join(APP, f), 'utf8'), ctx, { filename: f });
+    return _;
+  });
+
+var fail = 0;
+function ok(c, m) { if (!c) { console.log('  FAIL ' + m); fail++; } }
+function deep(el) {
+  if (el.tagName === '#TEXT') return el.text || '';
+  return (el.text || '') + el.children.map(deep).join('');
+}
+
+// ---- 1. 空数据也得挂得上(第一次打开就是这个状态)----
+ok(typeof ctx.Store === 'object', 'Store 没加载出来');
+ok(typeof ctx.Portfolio === 'object', 'Portfolio 没加载出来');
+ok(typeof ctx.Allocate === 'object', 'Allocate 没加载出来');
+ok(typeof ctx.Ledger === 'object', 'Ledger 没加载出来');
+ok(typeof ctx.Config === 'object', 'Config 没加载出来');
+ok(typeof ctx.NowUI === 'object' && typeof ctx.NowUI.mount === 'function', 'NowUI 没挂上');
+ok(typeof ctx.EntryUI === 'object', 'EntryUI 没挂上');
+ok(typeof ctx.SettingsUI === 'object', 'SettingsUI 没挂上');
+
+var t0 = deep(appDiv);
+ok(t0.length > 0, '★ 空数据时页面是空的 —— 第一次打开就白屏');
+ok(/录第一期|还没有数据/.test(t0), '空状态没说清下一步该干什么:' + t0.slice(0, 60));
+
+// ---- 2. ★ 塞真实数据再挂一次 ----
+// 空数据能挂不代表有数据能挂,而有数据那条路才是天天走的。
+var real = JSON.parse(require('fs').readFileSync(
+  require('path').join(process.env.TEMP || '/tmp', 'pf', 'backup-keep.json'), 'utf8'));
+Object.keys(real.data).forEach(function (k) {
+  mem[NS + k] = JSON.stringify(real.data[k]);
+});
+
+['NowUI', 'SettingsUI', 'EntryUI'].forEach(function (name) {
+  var node = new El('div');
+  try {
+    ctx[name].mount(node, { onEntry: function () {}, onDone: function () {},
+                            onChanged: function () {} });
+  } catch (e) {
+    ok(false, '★ ' + name + ' 拿真实数据挂载时抛异常:' + e.message);
+    console.log('     ' + (e.stack || '').split('\n')[1]);
+    return;
+  }
+  var t = deep(node);
+  ok(t.length > 30, '★ ' + name + ' 挂上了但页面是空的(' + t.length + ' 字)—— 白屏');
+});
+
+// ---- 3. 「现在」页要真的把该做的事算出来 ----
+//
+// ⚠️ 断言里**不写死金额** —— 仓库是公开的。
+//    改成从加载进去的那份数据里现算一个总额出来比对:
+//    既不泄露数字,又比写死更严 —— 换一份数据这条照样有效。
+var now = new El('div');
+ctx.NowUI.mount(now, { onEntry: function () {} });
+var tn = deep(now).replace(/\s/g, '');
+
+var latest = ctx.Ledger.latest(ctx.Store.get('snapshots', []));
+var wantTotal = Math.round(ctx.Portfolio.sum(latest.holdings) +
+                           ctx.Portfolio.sum(latest.cash));
+var withCommas = String(wantTotal).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+ok(tn.indexOf(withCommas) >= 0 || tn.indexOf(String(wantTotal)) >= 0,
+   '★ 首屏没显示最新一期的组合总额 —— 那是这一页的第一行');
+
+// 计划里排第一的那一类必须出现在首屏 —— 那是这个 app 的主要产出
+var plan = ctx.Allocate.planMonthly(latest, ctx.Store.get('settings', {}));
+var head = (plan.today[0] || plan.daily[0] || {}).category;
+ok(head && tn.indexOf(head) >= 0,
+   '★ 首屏没给出「今天买什么」(算出来该买 ' + head + ')');
+ok(plan.daily.length === 0 || tn.indexOf(plan.daily[0].category) >= 0,
+   '按日投那几项没出来');
+
+// ---- 4. 设置页要把未分类的露出来 ----
+//
+// 未分类的基金代码从数据里取,不写死 —— 代码本身不是秘密,
+// 但写死了换一份数据这条就静默失效了。
+var se = new El('div');
+ctx.SettingsUI.mount(se, {});
+var ts = deep(se);
+var known = {};
+(ctx.Store.get('settings', {}).funds || []).forEach(function (f) { known[f.code] = 1; });
+var orphans = [];
+(ctx.Store.get('snapshots', []) || []).forEach(function (s) {
+  Object.keys(s.holdings || {}).forEach(function (c) {
+    if (!known[c] && orphans.indexOf(c) < 0) orphans.push(c);
+  });
+});
+orphans.forEach(function (c) {
+  ok(ts.indexOf(c) >= 0,
+     '★ 设置页没显示未分类的 ' + c + ' —— 藏起来的话那笔钱永远不参与再平衡,' +
+     '而你只会奇怪总额为什么对不上');
+});
+
+console.log(fail ? '开机 ' + fail + ' 处不对'
+                 : '  开机 ok(空数据不白屏 · 真实数据能挂 · 首屏算得出该买什么)');
+process.exit(fail ? 1 : 0);

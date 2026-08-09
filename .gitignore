@@ -1,0 +1,6 @@
+# 钱不进仓库。仓库是公开的,数据只存浏览器本地。
+*.db
+*backup*.json
+token*
+node_modules/
+__pycache__/

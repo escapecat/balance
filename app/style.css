@@ -197,7 +197,23 @@ body {
    ⚠️ 用 JS 标记而不是 `:last-child`：好几页的末尾是按钮或提示文字，
       靠 CSS 选不中它前面那个列表。
    `flex: 1 0 auto` 而不是 `1`：内容真的很长时不许被压缩。 */
-.fill-rest { flex: 1 0 auto; }
+.fill-rest {
+  flex: 1 0 auto;
+  /* ⚠️ **负外边距抵消 .wrap 的下内边距。**
+     光靠 flex:1 只能撑到内容盒底部，而 .wrap 还有 16px 的 padding-bottom ——
+     那 16px 就是列表底边和 tab 栏顶边之间剩下的最后一条缝。
+     （前一条是 body 让出的空间和 tab 栏真实高度差的 11px。
+       同一个症状有两个来源，修掉一个另一个还在，所以看起来「没修好」。） */
+  margin-bottom: calc(var(--s4) * -1);
+  /* 铺到底之后底部圆角就没意义了 —— 留着会在角上露出两小块页面底色，
+     而那正是我们要消掉的东西。 */
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.fill-rest > :last-child {
+  border-bottom-left-radius: 0 !important;
+  border-bottom-right-radius: 0 !important;
+}
 
 h1 { font-size: var(--t-lg); font-weight: 650; margin: var(--s1) 0 var(--s1);
      letter-spacing: -.01em; }

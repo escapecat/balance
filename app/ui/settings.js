@@ -663,6 +663,9 @@ var SettingsUI = (function () {
     var barR = barEl && barEl.getBoundingClientRect ? barEl.getBoundingClientRect() : null;
     var vhNow = (typeof window !== 'undefined' && window.innerHeight) || 0;
     var gapBelow = barR ? Math.round(vhNow - barR.bottom) : null;
+    var wrapEl = document.querySelector('.wrap');
+    var wrapR = wrapEl && wrapEl.getBoundingClientRect
+                  ? wrapEl.getBoundingClientRect() : null;
     var standalone = false;
     try {
       standalone = !!(window.matchMedia &&
@@ -672,8 +675,17 @@ var SettingsUI = (function () {
     w.appendChild(h('h2', {}, ['屏幕适配']));
     w.appendChild(h('div', { class: 'list' }, [
       infoRow2('底部安全区', 'env(safe-area-inset-bottom)', safeB + ' px'),
-      infoRow2('tab 栏底下还剩', '不是 0 就是那条黑边的高度',
+      infoRow2('tab 栏底下还剩', '不是 0 就是 tab 栏没贴到屏幕底',
                gapBelow == null ? '—' : gapBelow + ' px'),
+      // ⚠️ **这一项才是「历史页那条黑边」的直接读数。**
+      //    内容区底边和 tab 栏顶边之间的缝 —— 它有过两个来源:
+      //    body 让出的空间和 tab 栏真实高度差的 11px、
+      //    以及 .wrap 自己的 16px 下内边距。修掉一个另一个还在,
+      //    所以看起来一直「没修好」。两个都清掉之后这里该是 0。
+      //    ⚠️ 在设置页看这个数是**负的**(内容长、超出一屏),那是正常的;
+      //    要判断历史页,得内容短的那种页面才准。
+      infoRow2('内容底边到 tab 栏', '正数就是那条缝;负数表示内容更长',
+               (barR && wrapR) ? Math.round(barR.top - wrapR.bottom) + ' px' : '—'),
       infoRow2('全屏模式', '从主屏图标打开才是「是」', standalone ? '是' : '否'),
     ]));
 

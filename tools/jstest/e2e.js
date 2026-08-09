@@ -66,14 +66,35 @@ var sm = Portfolio.summarize(snap, st);
 var gapOf = {};
 sm.rows.forEach(function (r) { if (!r.isCash && !r.unknown) gapOf[r.category] = r.gap; });
 
+// ⚠️ **「清单 = 配置表缺口」只在现金充足时成立。**
+//    现金不够时清单是按缺口比例缩过的,这时候正确的不变量是另外两条:
+//      · Σ今天买的 = 可投现金(一分不剩,也一分不超)
+//      · 各类按缺口比例分,谁都不该被单独优待
+//    我一开始把前一条当成无条件的不变量,现金一变紧就整片误报。
+var tight = p.spentToday >= p.cashAvailable - 1;
 var todayMap = {};
 p.today.forEach(function (t) { todayMap[t.category] = t.amount; });
 Object.keys(E.today).forEach(function (c) {
   ok(todayMap[c] === E.today[c], c + ':今天买的金额偏离基线');
-  ok(todayMap[c] === Math.round(gapOf[c]),
-     c + ':清单和配置表得是同一个数(差 ' +
-     Math.round((todayMap[c] || 0) - gapOf[c]) + ')');
+  if (!tight) {
+    ok(todayMap[c] === Math.round(gapOf[c]),
+       c + ':现金够的时候,清单和配置表得是同一个数(差 ' +
+       Math.round((todayMap[c] || 0) - gapOf[c]) + ')');
+  }
 });
+if (tight) {
+  var listed = Object.keys(todayMap).reduce(function (a, c) { return a + todayMap[c]; }, 0);
+  ok(Math.abs(listed - p.cashAvailable) < 2,
+     '★ 现金紧的时候,今天买的合计该正好花光可投现金(' +
+     listed + ' vs ' + p.cashAvailable + ')');
+  var totalGap = 0;
+  sm.rows.forEach(function (r) { if (!r.isCash && !r.unknown && r.gap > 1) totalGap += r.gap; });
+  Object.keys(todayMap).forEach(function (c) {
+    var want = gapOf[c] / totalGap * p.cashAvailable;
+    ok(Math.abs(todayMap[c] - want) < 2,
+       '★ ' + c + ' 没按缺口比例分(' + todayMap[c] + ' vs ' + Math.round(want) + ')');
+  });
+}
 ok(Object.keys(todayMap).length === Object.keys(E.today).length,
    '今天买的条数偏离基线(实得 ' + Object.keys(todayMap).length + ')');
 
@@ -85,11 +106,14 @@ Object.keys(E.daily).forEach(function (c) {
   ok(dailyMap[c] && dailyMap[c].amount === Math.round(gapOf[c]),
      c + ':总额和配置表得一致');
 });
+ok(Object.keys(E.daily).length === p.daily.length,
+   '按日投的条数偏离基线 —— 日限额被改过?(实得 ' + p.daily.length + ')');
 
 // ⚠️ 现金够的时候,无限额的几类**今天一次填平** —— 不许按比例缩。
 //    第一版「按比例一起分」跑真数据才露馅:黄金只分到该有的八成。
 ok(p.spentToday === E.spentToday, '今天合计偏离基线(实得 ' + p.spentToday + ')');
-ok(p.cashAvailable > p.spentToday, '这期现金是够的,所以不该出现缩放');
+ok(tight ? p.shortfall > 0 : p.cashAvailable > p.spentToday,
+   tight ? '现金不够就该报出填不满的差额' : '现金够就不该出现缩放');
 
 // ---- 2. 计划 → 待办 ----
 var nToday = Object.keys(E.today).length, nDaily = Object.keys(E.daily).length;
@@ -123,12 +147,30 @@ next.netInflow = 0;
 
 var p2 = Allocate.planMonthly(next, st);
 var still = p2.today.concat(p2.daily).filter(function (x) { return x.fund.code === code; });
-ok(still.length === 0, '买过之后不该再出现在清单里(实得 ' + still.length + ' 条)');
+var sm2 = Portfolio.summarize(next, st);
+var gap2 = sm2.rows.filter(function (r) { return r.category === firstCat; })[0].gap;
+
+// ⚠️ 现金够不够,决定了「买完之后它还在不在清单上」——
+//    现金够 → 缺口填平,清单上没有了
+//    现金紧 → 只买了一部分,它还在,只是缺口小了一截
+//    这两种都对,错的是「买了之后缺口没变小」。
+if (tight) {
+  ok(gap2 < gapOf[firstCat] - 1,
+     '★ 买了一笔之后缺口没变小(' + Math.round(gapOf[firstCat]) +
+     ' → ' + Math.round(gap2) + ')');
+} else {
+  ok(still.length === 0, '现金够的时候买完就该填平,清单上不该还有(实得 ' +
+     still.length + ' 条)');
+}
 
 Todos.sync(p2, next.date, '2026-08-09');
-ok(get(firstId).status === 'done',
-   '已经做完的不该被改成 resolved —— 那会把「你做的」记成「涨平的」(实得 ' +
-   get(firstId).status + ')');
+// ⚠️ 换了一期之后,没做完的会开新一轮(open),做完的保持 done。
+//    **无论如何都不许是 resolved** —— 那个状态的意思是「缺口被市值涨平的」,
+//    把你真金白银买出来的记成 resolved,统计里「实投 vs 应投」就全错了。
+ok(get(firstId).status !== 'resolved',
+   '★ 你买出来的被记成了「已达标」—— 那是市值涨平才用的状态');
+ok(tight ? get(firstId).status === 'open' : get(firstId).status === 'done',
+   '换一期之后的状态不对(实得 ' + get(firstId).status + ')');
 ok(Todos.flows().length === 1, '重新对账不许凭空多出现金流');
 
 // ---- 5. 组合口径:外部资产不进组合总额 ----

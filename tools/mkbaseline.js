@@ -57,17 +57,46 @@ mem.snapshots.forEach(function (s) {
 p.today.forEach(function (t) { exp.today[t.category] = t.amount; });
 p.daily.forEach(function (d) { exp.daily[d.category] = { days: d.days, amount: d.amount }; });
 
-// 自己先验一遍口径 —— 对不上就不该写出去
+// 自己先验一遍口径 —— 对不上就不该写出去。
+//
+// ⚠️ **「清单 = 配置表缺口」只在现金充足时成立。**
+//    我一开始把它当成无条件的不变量,结果现金一变紧就整片误报。
+//    现金不够时正确的不变量是另外两条:
+//      · Σ今天买的 = 可投现金(一分不剩,也一分不超)
+//      · 各类按缺口比例分,谁都不该被单独优待
 var bad = [];
+var tight = p.spentToday < p.cashAvailable - 1 ? false : true;
 sm.rows.forEach(function (r) {
   if (r.isCash || r.unknown || r.gap == null || r.gap <= 1) return;
   var got = exp.today[r.category] != null ? exp.today[r.category]
           : (exp.daily[r.category] || {}).amount;
   if (got == null) { bad.push(r.category + ' 有缺口 ' + Math.round(r.gap) + ' 但清单上没有'); return; }
-  if (got !== Math.round(r.gap)) {
+  if (!tight && got !== Math.round(r.gap)) {
     bad.push(r.category + ' 清单 ' + got + ' ≠ 配置表 ' + Math.round(r.gap));
   }
 });
+if (tight) {
+  var listed = 0;
+  Object.keys(exp.today).forEach(function (c) { listed += exp.today[c]; });
+  if (Math.abs(listed - p.cashAvailable) > 2) {
+    bad.push('现金紧的时候,今天买的合计应该正好等于可投现金(' +
+             listed + ' vs ' + p.cashAvailable + ')');
+  }
+  // 比例:每一类拿到的应该是「它的缺口 ÷ 总缺口 × 可投现金」
+  var totalGap = 0;
+  sm.rows.forEach(function (r) {
+    if (!r.isCash && !r.unknown && r.gap > 1) totalGap += r.gap;
+  });
+  sm.rows.forEach(function (r) {
+    if (r.isCash || r.unknown || !(r.gap > 1)) return;
+    var want = r.gap / totalGap * p.cashAvailable;
+    var got2 = exp.today[r.category];
+    if (got2 != null && Math.abs(got2 - want) > 2) {
+      bad.push(r.category + ' 分到的和按缺口比例算的对不上(' +
+               got2 + ' vs ' + Math.round(want) + ')');
+    }
+  });
+}
 
 console.log('');
 console.log('基线(' + snap.date + ',' + exp.snapshotCount + ' 期):');
@@ -95,7 +124,8 @@ if (bad.length) {
   process.exit(1);
 }
 
-console.log('✓ 清单和配置表逐类一致。');
+console.log(tight ? '✓ 现金不够,按缺口比例分,合计正好花光可投现金。'
+                  : '✓ 现金够,清单和配置表逐类一致。');
 console.log('');
 console.log('  ⚠️ 写出去之前**对着基金 app 核一遍**上面这几个数。');
 console.log('     核过了就没事了;没核就写出去的话,以后测试永远绿,');

@@ -79,8 +79,17 @@ ok(Object.keys(st.targets || {}).length === 6, '六大类目标比例没搬全')
 ok(Math.abs(Object.keys(st.targets).reduce(function (a, k) { return a + st.targets[k]; }, 0) - 1)
    < 1e-9, '目标比例加起来不等于 1');
 ok((st.funds || []).length >= 10, '基金清单没搬全,只有 ' + (st.funds || []).length + ' 只');
-ok((st.funds || []).some(function (f) { return f.dailyLimit === 2000; }),
-   '日限额没搬过来 —— 没有它,再平衡算不出「还要几个交易日」');
+// ⚠️ 这里**不再验日限额**。它确实是迁移搬过来的,但那之后
+//    用户在设置页把它去掉了(不再受单日申购限额约束)——
+//    而这个文件读的是**同一份产物**,它是允许被后续编辑的。
+//    拿一个会被合法修改的字段当断言,迟早会红,而红的原因不是 bug。
+//    真正该钉死的是「迁移当时有没有漏搬」,那件事已经发生并验证过了。
+(st.funds || []).forEach(function (f) {
+  ok(f.code && f.name && f.category,
+     '基金 ' + JSON.stringify(f) + ' 缺字段 —— 缺哪个都会让它掉出再平衡');
+  ok(f.dailyLimit === undefined || typeof f.dailyLimit === 'number',
+     f.code + ' 的日限额不是数字');
+});
 ok((st.locked || []).length >= 1, '锁仓持仓没搬 —— 年度再平衡会把锁着的也卖了');
 
 // ---- 5. 每只基金都归得了类 ----

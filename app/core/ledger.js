@@ -214,6 +214,61 @@ var Ledger = (function () {
              left: next.length };
   }
 
+  /** 把某个代码的持仓**并进**另一只 —— 处理「当年打错了代码」。
+   *
+   * ⚠️ 这会改历史,所以先留回滚点。但它**不改任何一期的总额** ——
+   *    钱还是那些钱,只是换了个名字挂着。这是三种处理里最安全的一种。 */
+  function mergeHolding(from, to) {
+    if (!from || !to || from === to) return { ok: false, why: '得是两个不同的代码' };
+    var list = Store.get('snapshots', []) || [];
+    var hit = list.filter(function (s) { return (s.holdings || {})[from] != null; });
+    if (!hit.length) return { ok: false, why: '没有哪一期持有 ' + from };
+    Store.saveRollback('把 ' + from + ' 并进 ' + to + ' 之前');
+    var moved = 0;
+    var next = list.map(function (s) {
+      var h = Object.assign({}, s.holdings || {});
+      if (h[from] == null) return s;
+      moved += h[from];
+      h[to] = (typeof h[to] === 'number' ? h[to] : 0) + h[from];
+      delete h[from];
+      return Object.assign({}, s, { holdings: h });
+    });
+    Store.set('snapshots', next);
+    return { ok: true, periods: hit.length, moved: moved };
+  }
+
+  /** 把某个代码从**所有历史**里抹掉 —— 处理「当年记错了,那笔钱本来就不存在」。
+   *
+   * ⚠️ 这是唯一会**改变历史总额**的操作。做完之后那几期的数字
+   *    和你当年在基金 app 上看到的就对不上了 —— 所以调用方必须
+   *    把「哪几期、各变多少」摆出来让人确认,而不是问一句「确定吗」。 */
+  function dropHolding(code) {
+    var list = Store.get('snapshots', []) || [];
+    var hit = list.filter(function (s) { return (s.holdings || {})[code] != null; });
+    if (!hit.length) return { ok: false, why: '没有哪一期持有 ' + code };
+    Store.saveRollback('删掉 ' + code + ' 之前');
+    var removed = 0;
+    var next = list.map(function (s) {
+      if ((s.holdings || {})[code] == null) return s;
+      var h = Object.assign({}, s.holdings);
+      removed += h[code];
+      delete h[code];
+      return Object.assign({}, s, { holdings: h });
+    });
+    Store.set('snapshots', next);
+    return { ok: true, periods: hit.length, removed: removed,
+             dates: hit.map(function (s) { return s.date; }) };
+  }
+
+  /** 某个代码在各期分别是多少 —— 界面上要先摆出来再让人决定。 */
+  function holdingHistory(code) {
+    return (Store.get('snapshots', []) || []).filter(function (s) {
+      return (s.holdings || {})[code] != null;
+    }).map(function (s) {
+      return { date: s.date, value: s.holdings[code] };
+    });
+  }
+
   /** 草稿 —— 手机上抄一半切走、被杀进程,回来能续。
    *
    * ⚠️ 存的是**原始输入字符串**,不是解析后的数字。
@@ -227,6 +282,8 @@ var Ledger = (function () {
   return { EMPTY: EMPTY, parse: parse, isEmpty: isEmpty,
            build: build, append: append, latest: latest, delta: delta, perFund: perFund,
            commit: commit, removeSnapshot: removeSnapshot,
+           mergeHolding: mergeHolding, dropHolding: dropHolding,
+           holdingHistory: holdingHistory,
            saveDraft: saveDraft, loadDraft: loadDraft, dropDraft: dropDraft };
 })();
 

@@ -70,7 +70,7 @@ var SettingsUI = (function () {
         var amount = stillHeld ? snap.holdings[code]
                                : (snaps.filter(function (x) { return x.date === dates[dates.length - 1]; })[0] || {}).holdings[code];
         ol.appendChild(h('div', {
-          class: 'list-row', onclick: function () { editFund({ code: code }, true); },
+          class: 'list-row', onclick: function () { fixOrphan(code, amount, dates); },
         }, [
           h('div', { class: 'body' }, [
             h('div', { class: 'ttl' }, [code]),
@@ -289,6 +289,80 @@ var SettingsUI = (function () {
       ]),
       h('div', { class: 'num', style: 'font-weight:600' }, [money(value) + suffix]),
     ]);
+  }
+
+  /** 处理一只「未分类」的持仓。
+   *
+   *  ⚠️ 三条路对应三种**当年发生过的事**,而只有你知道是哪种:
+   *      打错了代码 → 并进对的那只,总额不变(最安全)
+   *      真买过     → 加进基金清单,归个类
+   *      记错了     → 从历史里删掉,**总额跟着变**
+   *
+   *  ⚠️ 最后那条是唯一会改变历史总额的操作,所以要把
+   *     「哪几期、各变多少」摆出来让人看清,而不是问一句「确定吗」。
+   */
+  function fixOrphan(code, amount, dates) {
+    Modal.pick({
+      title: code,
+      hint: '¥' + money(amount) + ' · 出现在 ' + dates.join('、'),
+      options: [
+        { key: 'merge', label: '并进另一只', hint: '当年打错了代码 —— 总额不变' },
+        { key: 'add', label: '加进基金清单', hint: '确实买过这只,给它归个类' },
+        { key: 'drop', label: '从历史里删掉', danger: true,
+          hint: '当年记错了,那笔钱本来就不存在 —— 总额会跟着减' },
+      ],
+    }).then(function (v) {
+      if (v === 'add') { editFund({ code: code }, true); return; }
+      if (v === 'merge') { mergeOrphan(code); return; }
+      if (v === 'drop') { dropOrphan(code); return; }
+    });
+  }
+
+  function mergeOrphan(code) {
+    var funds = st().funds || [];
+    if (!funds.length) { Modal.note({ title: '清单里还没有基金', body: '先加一只再来并。' }); return; }
+    Modal.pick({
+      title: '并进哪一只?',
+      hint: code + ' 的钱会加到你选的那只上,每一期的总额都不变',
+      options: funds.map(function (f) {
+        return { key: f.code, label: f.name || f.code, hint: f.code + ' · ' + f.category };
+      }),
+    }).then(function (to) {
+      if (!to) return;
+      var r = Ledger.mergeHolding(code, to);
+      if (!r.ok) { Modal.note({ title: '并不了', body: r.why }); return; }
+      Modal.note({ title: '并好了',
+                   body: r.periods + ' 期里的 ¥' + money(r.moved) + ' 已经并进 ' + to +
+                         '。\n总额一分没变 —— 只是换了个名字挂着。' });
+      if (onChanged) onChanged();
+      render();
+    });
+  }
+
+  function dropOrphan(code) {
+    var hist = Ledger.holdingHistory(code);
+    var lines = hist.map(function (h) {
+      var before = Store.get('snapshots', []).filter(function (s) { return s.date === h.date; })[0];
+      var tot = Portfolio.sum(before.holdings) + Portfolio.sum(before.cash);
+      return h.date + ':' + money(tot) + ' → ' + money(tot - h.value) +
+             '(少 ' + money(h.value) + ')';
+    });
+    Modal.confirm({
+      title: '把 ' + code + ' 从历史里删掉?',
+      body: '这几期的**总额会变**:\n\n' + lines.join('\n') +
+            '\n\n变完之后,那几期的数字和你当年在基金 app 上看到的就对不上了。\n' +
+            '删之前会自动存回滚点,设置页里能退回来。',
+      ok: '删掉', danger: true,
+    }).then(function (ok) {
+      if (!ok) return;
+      var r = Ledger.dropHolding(code);
+      if (!r.ok) { Modal.note({ title: '删不了', body: r.why }); return; }
+      // 清单里那条登记也要跟着去掉,不然设置页还挂着一个指向不存在的东西
+      var s = st();
+      Config.save({ unclassified: (s.unclassified || []).filter(function (c) { return c !== code; }) });
+      if (onChanged) onChanged();
+      render();
+    });
   }
 
   /** 加 / 改 / 删一只基金 —— 一个弹层问完,不做多步向导 */

@@ -141,19 +141,38 @@
    *     `min-height: calc(100svh - 53px - env(...))`，而那一串里
    *     每一项都是假设 —— 错一项就是「短页面多出 34px 可滑动」。
    *
-   *  ⚠️ 只标**真正排在最后**的那块容器。后面还有按钮的话拉它，
-   *     等于把按钮推到最底下，中间空一大块。
+   *  ⚠️ **从后往前找最后一块容器，不管它后面还有没有按钮。**
+   *     上一版特意跳过「后面还有按钮」的情况，理由是「会把按钮推到底下」——
+   *     方向反了:把按钮推到底部**正是**消除底部那片空白的办法，
+   *     而且移动端主操作本来就该在底部（拇指够得着）。
+   *     跳过它的结果是主界面、方案屏这些末尾是按钮的页面全都留着大片空白。
+   *
    *  ⚠️ 空状态那一屏不标(它自己居中)。
    */
   function fillRest(page) {
     var wrap = page.querySelector && page.querySelector('.wrap');
     if (!wrap || (wrap.className || '').indexOf('wrap-fill') >= 0) return;
+    // ⚠️ 规则不能只是「从后往前找第一个容器」——
+    //    统计页那样的长页面会拉中间某个图表，把它后面八个元素全挤到底部，
+    //    中间空一大块，比原来还糟。
+    //
+    //    **只跳过「小尾巴」**:按钮、提示、说明文字。
+    //    这些东西被推到底部是合理的（移动端主操作本来就在底部），
+    //    而一旦遇到标题、另一个列表这类「还有正文」的信号，就放弃 ——
+    //    那说明这块容器不在末尾，它后面还有内容要读。
     var kids = wrap.children || [];
-    var last = kids[kids.length - 1];
-    if (!last) return;
-    var c = (last.className || '');
-    if (c.indexOf('list') >= 0 || c.indexOf('card') >= 0 || c.indexOf('chart') >= 0) {
-      last.className = c + ' fill-rest';
+    for (var i = kids.length - 1; i >= 0; i--) {
+      var el = kids[i];
+      var c = (el.className || '');
+      var tag = (el.tagName || '').toUpperCase();
+      if (c.indexOf('list') >= 0 || c.indexOf('card') >= 0 || c.indexOf('chart') >= 0) {
+        el.className = c + ' fill-rest';
+        return;
+      }
+      var isTail = tag === 'BUTTON' || tag === 'A' ||
+                   c.indexOf('hint') >= 0 || c.indexOf('note') >= 0 ||
+                   c.indexOf('link') >= 0 || c.indexOf('btn') >= 0;
+      if (!isTail) return;      // 遇到标题之类的正文信号 → 不拉
     }
   }
 

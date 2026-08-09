@@ -227,11 +227,15 @@ body {
    拉伸它们会拉出一个巨高的按钮，所以要挑「真正排在最后的那块容器」。 */
 .fill-rest {
   flex: 1 0 auto;
-  margin-bottom: calc(var(--s4) * -1);   /* 抵消 .wrap 的下内边距，真的贴到底 */
+  /* ⚠️ 只有**真的排在最后**时才抵消 .wrap 的下内边距。
+     后面还跟着按钮的话，负边距会把按钮往上顶进列表里。 */
+}
+.fill-rest:last-child {
+  margin-bottom: calc(var(--s4) * -1);
   border-bottom-left-radius: 0;
   border-bottom-right-radius: 0;
 }
-.fill-rest > :last-child {
+.fill-rest:last-child > :last-child {
   border-bottom-left-radius: 0 !important;
   border-bottom-right-radius: 0 !important;
 }

@@ -119,41 +119,16 @@
     } else {
       NowUI.mount(page, { onEntry: function () { entering = true; render(); } });
     }
-    fillRest(page);
     root.appendChild(page);
     root.appendChild(tabbar());
   }
 
-  /** 把页面最后一块内容容器拉长，占掉 tab 栏以上剩下的空间。
-   *
-   *  ⚠️ 为什么需要：卡片底色(--surface)和页面底色(--bg)不一样，
-   *     内容不满一屏时那道色差看起来就是「页面到此为止，下面空了一块」。
-   *     而内容长的页面(设置)整屏都是卡片色，所以显得完整 ——
-   *     同一个 app 里两种观感，差别只来自内容多少。
-   *
-   *  ⚠️ 为什么在这儿做而不是用 CSS `:last-child`：
-   *     好几页的末尾是按钮或提示文字，CSS 选不中它前面那个列表；
-   *     而直接拉伸最后一个元素的话，会拉出一个巨高的按钮。
-   *
-   *  ⚠️ 空状态那一屏不动 —— 它自己会居中(.wrap-fill)，
-   *     再拉伸一次会把居中顶掉。
-   */
-  function fillRest(page) {
-    var wrap = page.querySelector && page.querySelector('.wrap');
-    if (!wrap || (wrap.className || '').indexOf('wrap-fill') >= 0) return;
-    // ⚠️ **只拉伸真正排在最后的那一块。**
-    //    早先是从后往前找第一个列表就拉 —— 而主界面「上一期」那个列表
-    //    后面还有三个按钮,拉伸它等于把按钮推到屏幕最底下,
-    //    中间空出一大块,比原来那道色差还难看。
-    //    后面还有东西的话就不该拉它,那种页面靠底色接近来兜底(见 style.css)。
-    var kids = wrap.children || [];
-    var last = kids[kids.length - 1];
-    if (!last) return;
-    var c = (last.className || '');
-    if (c.indexOf('list') >= 0 || c.indexOf('card') >= 0 || c.indexOf('chart') >= 0) {
-      last.className = c + ' fill-rest';
-    }
-  }
+  /** ⚠️ fillRest 已删。它靠拉伸最后一块列表去填底部空白，
+   *  而那依赖 .wrap 的 min-height —— 那一行让短页面多出 34px 可滚动空间，
+   *  切 tab 时手上的反馈忽有忽无，也就是「上下跳」。
+   *  空白改由「页面底色 = 卡片底色」解决，不需要拉伸任何东西。 */
+
+
 
   render();
 

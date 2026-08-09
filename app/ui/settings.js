@@ -539,6 +539,17 @@ var SettingsUI = (function () {
     });
   }
 
+  /** 一行「标签 / 说明 / 值」。 */
+  function infoRow2(label, sub2, value) {
+    return h('div', { class: 'list-row' }, [
+      h('div', { class: 'body' }, [
+        h('div', { class: 'ttl' }, [label]),
+        h('div', { class: 'sub2' }, [sub2]),
+      ]),
+      h('div', { class: 'amt' }, [value]),
+    ]);
+  }
+
   /** 二级屏:数据与备份。低频操作全在这儿。 */
   function dataScreen() {
     var w = h('div', { class: 'wrap' });
@@ -634,6 +645,38 @@ var SettingsUI = (function () {
       var m = document.querySelector('meta[name="build"]');
       build = m && m.getAttribute('content');
     } catch (e) {}
+    // ---- 屏幕适配的真实数值 ----
+    //
+    // ⚠️ 放这儿是因为**开发机上量不到这几个数**。
+    //    底部安全区(iPhone home indicator 那一条)只在
+    //    「从主屏图标打开」时才存在,而那个模式我这边复现不了 ——
+    //    改了四轮 tab 栏底下那条黑边都没对,每轮都在赌 env() 到底算出多少。
+    //    直接显示出来,下次一眼就知道该改哪儿。
+    var probe = h('div', {});
+    probe.style.cssText =
+      'position:fixed;bottom:0;height:env(safe-area-inset-bottom);width:1px;';
+    document.body.appendChild(probe);
+    var safeB = 0;
+    try { safeB = Math.round(probe.getBoundingClientRect().height); } catch (e) {}
+    if (probe.parentNode) probe.parentNode.removeChild(probe);
+    var barEl = document.querySelector('.tabbar');
+    var barR = barEl && barEl.getBoundingClientRect ? barEl.getBoundingClientRect() : null;
+    var vhNow = (typeof window !== 'undefined' && window.innerHeight) || 0;
+    var gapBelow = barR ? Math.round(vhNow - barR.bottom) : null;
+    var standalone = false;
+    try {
+      standalone = !!(window.matchMedia &&
+                      window.matchMedia('(display-mode: standalone)').matches);
+    } catch (e) {}
+
+    w.appendChild(h('h2', {}, ['屏幕适配']));
+    w.appendChild(h('div', { class: 'list' }, [
+      infoRow2('底部安全区', 'env(safe-area-inset-bottom)', safeB + ' px'),
+      infoRow2('tab 栏底下还剩', '不是 0 就是那条黑边的高度',
+               gapBelow == null ? '—' : gapBelow + ' px'),
+      infoRow2('全屏模式', '从主屏图标打开才是「是」', standalone ? '是' : '否'),
+    ]));
+
     w.appendChild(h('h2', {}, ['版本']));
     w.appendChild(h('div', { class: 'list' }, [
       h('div', { class: 'list-row', onclick: hardReload }, [

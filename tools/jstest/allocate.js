@@ -128,6 +128,43 @@ a2.sells.forEach(function (x) {
   ok(x.amount <= 130000, '卖出超过了实际持仓:' + JSON.stringify(x));
 });
 
+// ---- ★ 年度:卖出来的钱必须有地方去 ----
+//
+// 拿真数据模拟「一年后」时抓到的:某一类超配 5.4 个点被卖掉,
+// 而欠配的几类各差 1~4 个点、都够不着偏差带,于是买入清单是空的 ——
+// 卖了十几万,那笔钱凭空消失,而界面上还写着「卖多少买多少」。
+//
+// 正确语义:**够不够得着带子决定要不要动手;一旦动手,
+// 钱就该回到所有欠配的地方去。** 带子只筛「卖谁」,不筛「买谁」。
+var BAND = {
+  targets: { 股: 0.25, 债: 0.25, 金: 0.25, 红: 0.25 },
+  funds: [{ code: 'S1', category: '股', primary: true },
+          { code: 'B1', category: '债', primary: true },
+          { code: 'G1', category: '金', primary: true },
+          { code: 'R1', category: '红', primary: true }],
+  cashFloor: 0, cashTarget: 0, band: 0.05, minBuy: 1000,
+};
+// 股超配 6 个点(要卖);其余三类各欠 2 个点(都够不着带子)
+var drifted = { holdings: { S1: 310000, B1: 230000, G1: 230000, R1: 230000 }, cash: {} };
+var ann = Allocate.planAnnual(drifted, BAND, '2027-01-01');
+var sold = ann.sells.reduce(function (a, x) { return a + x.amount; }, 0);
+var got = ann.buys.reduce(function (a, x) { return a + x.amount; }, 0);
+ok(sold > 0, '股超配 6 个点,该卖(实得卖 ' + sold + ')');
+ok(got > 0, '★ 卖了 ' + sold + ' 却一分钱都没买 —— 那笔钱凭空消失了');
+ok(Math.abs(sold - got) < 2,
+   '★ 卖出和买入必须相等(卖 ' + sold + ' / 买 ' + got + ')—— 年度这一刀不碰现金');
+ok(ann.buys.length === 3, '三个欠配的类都该分到钱(实得 ' + ann.buys.length + ' 个)');
+
+// 没有哪一类超配到一个带 → 不动手
+var calm = { holdings: { S1: 252000, B1: 249000, G1: 250000, R1: 249000 }, cash: {} };
+ok(Allocate.planAnnual(calm, BAND, '2027-01-01').inBand, '都在带子里就不该动手');
+
+// ★ 两处口径必须一致:说该动手了,进去就得真有东西卖
+ok(Allocate.suggestMode(drifted, BAND, '2027-01-01').mode === 'annual',
+   'suggestMode 应该说该做年度了');
+ok(Allocate.planAnnual(drifted, BAND, '2027-01-01').sells.length > 0,
+   '★ suggestMode 说该动手,planAnnual 却没东西卖 —— 两处分母不一致');
+
 console.log(fail ? '再平衡 ' + fail + ' 处不对'
                  : '  再平衡 ok(只买不卖 · 无限额一次填平 · 限额拆天数 · ' +
                    '现金见底转年度 · 卖买相等 · 锁仓不卖)');

@@ -141,17 +141,34 @@ var Allocate = (function () {
     // 年度这一刀不动现金:卖多少就买多少,现金留在原地。
     // 拿现金一起算的话,「再平衡」和「投新钱」两件事混在一起,
     // 事后完全看不出这一刀到底调了什么。
+    //
+    // ⚠️ **偏差带只筛「卖谁」,不筛「买谁」。**
+    //    两边都用带子过滤的话会出现「卖了没处买」:
+    //    某一类超配 5.4 个点被卖掉,而欠配的几类各差 1~4 个点、都够不着带子,
+    //    于是买入清单是空的,卖出来的钱凭空消失 ——
+    //    而界面上还写着「卖多少买多少」。
+    //    正确语义是:**够不够得着带子决定要不要动手;一旦动手,
+    //    钱就该回到所有欠配的地方去。**
+    //
+    // ⚠️ 分母用 sm.total(组合总额),和 gaps 一个口径。
+    //    第一版这里写的是 sm.invested(不含现金),于是同一个「偏差几个点」
+    //    在两处算出不同的值 —— 而带子是「动不动手」的开关,
+    //    差一点点就是差一整次再平衡。
     var g = gaps(sm);
     var over = [], under = [], skipped = [];
     g.forEach(function (x) {
-      var drift = -x.need / (sm.invested || 1);        // 正 = 超配
-      if (Math.abs(drift) < band) return;              // 带内不折腾
-      (x.need < 0 ? over : under).push(x);
+      if (x.need < 0) {
+        if (-x.need / (sm.total || 1) < band) return;   // 超配不到一个带,不折腾
+        over.push(x);
+      } else if (x.need > 1) {
+        under.push(x);                                   // 欠配的全都接钱,不设门槛
+      }
     });
 
-    if (!over.length && !under.length) {
+    if (!over.length) {
       return { mode: 'annual', inBand: true, band: band, sells: [], buys: [],
-               amount: 0, note: '各类都在 ' + Math.round(band * 100) + ' 个点的带子里,这次不用动' };
+               amount: 0, note: '没有哪一类超配到 ' + Math.round(band * 100) +
+                                ' 个点,这次不用卖' };
     }
 
     // 卖:超配最多的先卖,同一类里退役基金优先出货
@@ -212,8 +229,11 @@ var Allocate = (function () {
     var sm = Portfolio.summarize(snap, settings);
     var band = settings.band != null ? settings.band : 0.05;
     var worst = 0;
+    // ⚠️ 分母是**组合总额**,和 gaps / planAnnual 一个口径。
+    //    这里判断「要不要动手」,那边判断「卖谁」——
+    //    两处用不同分母就会出现「说该动手了,进去一看没有一类够得着」。
     gaps(sm).forEach(function (x) {
-      var d = Math.abs(x.need) / (sm.invested || 1);
+      var d = Math.abs(x.need) / (sm.total || 1);
       if (d > worst) worst = d;
     });
     if (worst >= band) {

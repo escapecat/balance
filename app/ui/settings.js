@@ -80,7 +80,7 @@ var SettingsUI = (function () {
               ' · 点一下归类',
             ]),
           ]),
-          h('span', { class: 'dim' }, ['▸']),
+          h('span', { class: 'chev' }),
         ]));
       });
       w.appendChild(ol);
@@ -108,8 +108,7 @@ var SettingsUI = (function () {
         },
       }, [
         h('div', { class: 'body' }, [h('div', { class: 'ttl' }, [c])]),
-        h('div', { class: 'num', style: 'font-weight:600' },
-          [(s.targets[c] * 100).toFixed(0) + '%']),
+        h('div', { class: 'amt' }, [(s.targets[c] * 100).toFixed(0) + '%']),
       ]));
     });
     w.appendChild(tl);
@@ -148,7 +147,7 @@ var SettingsUI = (function () {
           h('div', { class: 'ttl' }, [f.name || f.code]),
           h('div', { class: 'sub2' }, [bits.join(' · ')]),
         ]),
-        h('span', { class: 'dim' }, ['▸']),
+        h('span', { class: 'chev' }),
       ]));
     });
     w.appendChild(fl);
@@ -201,7 +200,7 @@ var SettingsUI = (function () {
             (v == null ? '还没填过金额' : '¥' + money(v)),
           ]),
         ]),
-        h('span', { class: 'dim' }, ['▸']),
+        h('span', { class: 'chev' }),
       ]));
     });
     w.appendChild(al);
@@ -231,7 +230,7 @@ var SettingsUI = (function () {
               Actions.all().length + ' 笔记录',
             ]),
           ]),
-          h('span', { class: 'dim' }, ['▸']),
+          h('span', { class: 'chev' }),
         ]),
       ]));
     }
@@ -287,7 +286,7 @@ var SettingsUI = (function () {
         h('div', { class: 'ttl' }, [label]),
         h('div', { class: 'sub2' }, [sub]),
       ]),
-      h('div', { class: 'num', style: 'font-weight:600' }, [money(value) + suffix]),
+      h('div', { class: 'amt' }, [money(value) + suffix]),
     ]);
   }
 

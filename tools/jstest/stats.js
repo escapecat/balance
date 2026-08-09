@@ -12,6 +12,10 @@
 var path = require('path');
 var A = path.join(__dirname, '..', '..', 'app');
 global.Portfolio = require(path.join(A, 'core', 'portfolio.js'));
+// ⚠️ Stats 靠 Ledger.delta 判断「这一期分不分得开」—— 那是接缝所在。
+//    夹具里不给 Actions,于是走的是 delta 的「手填 netInflow」那条退路,
+//    正好覆盖老数据;动作驱动那条在 jstest/actions.js 里测。
+global.Ledger = require(path.join(A, 'core', 'ledger.js'));
 var Stats = require(path.join(A, 'core', 'stats.js'));
 
 var fail = 0;
@@ -40,15 +44,27 @@ var two = [snap('2026-05-11', 1000000, 0), snap('2026-06-11', 1050000, 0)];
 ok(!Stats.gate(two).ok, '★ 两期就敢给年化 —— 一个区间的年化没有意义');
 ok(Stats.gate(two).have === 2, '两期都可用,但不够');
 
-// ---- 2. ★ 连续性:中间断一期不许接起来算 ----
+// ---- 2. ★ 连续性:中间断一期不许跨过去接 ----
 //
 // 断掉的那段里投过多少钱是未知的,把两截接起来等于假装没投过。
-// 这里第 2 期没记 → 只有最后两期是连续的,不是四期也不是三期。
+//
+// ⚠️ 但**起点那一期不需要有流水记录** —— 它只提供期初市值。
+//    所以下面这组:第 2 期没记,断点在 1→2 之间;
+//    可用的是第 2、3、4 期(两个区间 2→3、3→4),一共 3 期,不是 2 期。
+//    早先的实现按「带 netInflow 的期数」数,白白少算一期 ——
+//    表现是明明记满了却还提示「还差一期」。
 var broken = [snap('2026-05-11', 1000000, 0), snap('2026-06-11', 1050000),
               snap('2026-07-11', 1100000, 0), snap('2026-08-11', 1150000, 0)];
-ok(Stats.usable(broken) === 2,
-   '★ 只能从最新往回数连续的那几期(实得 ' + Stats.usable(broken) + ')');
-ok(!Stats.gate(broken).ok, '断了之后可用的只剩两期,不够');
+ok(Stats.usable(broken) === 3,
+   '★ 可用期数算错(实得 ' + Stats.usable(broken) + ',应为 3:两个区间 + 起点)');
+ok(Stats.gate(broken).ok, '三期够了,不该再拦着');
+
+// 断点更靠后的话就真的不够了
+var broken2 = [snap('2026-05-11', 1000000, 0), snap('2026-06-11', 1050000, 0),
+               snap('2026-07-11', 1100000), snap('2026-08-11', 1150000, 0)];
+ok(Stats.usable(broken2) === 2,
+   '★ 断点靠后时只剩两期(实得 ' + Stats.usable(broken2) + ')');
+ok(!Stats.gate(broken2).ok, '两期不够,不许出数');
 
 // ---- 3. TWR:净投入要从期末扣掉 ----
 //

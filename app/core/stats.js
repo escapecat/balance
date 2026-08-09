@@ -7,10 +7,10 @@
 //    所以这里的 API 不返回 null 让界面自己猜,而是返回
 //    `{ ok: false, have: 1, need: 3 }` —— 界面照着说「还需 2 期」。
 //
-// ⚠️ **收益率的唯一前提是「本期净投入」。**
-//    没有它,总额从 A 涨到 B 你分不清是赚的还是又投的,
-//    任何收益率都是编的。老库的历史几期正好都没记,
-//    所以真正能出数要等新录几期 —— 这是时间问题,不是工作量问题。
+// ⚠️ **收益率的唯一前提是「这一期分得开涨跌和投入」。**
+//    分不开的话,总额从 A 涨到 B 你不知道是赚的还是又投的,
+//    任何收益率都是编的。老库那几期没有买卖记录,所以分不开;
+//    从你记第一笔买卖开始就分得开了 —— 这是时间问题,不是工作量问题。
 //
 // ⚠️ 时间加权(TWR)和资金加权(XIRR)答的是**两个不同的问题**:
 //      TWR  —— 这个组合本身表现如何(剔除你的申购时点)
@@ -22,26 +22,34 @@ var Stats = (function () {
 
   var MIN_PERIODS = 3;      // 至少 3 期 → 2 个区间。1 个区间的年化没有意义
 
-  function hasFlow(s) {
-    return typeof s.netInflow === 'number' && !isNaN(s.netInflow);
-  }
   function total(s) {
     return Portfolio.sum(s.holdings || {}) + Portfolio.sum(s.cash || {});
   }
 
-  /** 从最新往回数,**连续**带净投入的有几期。
+  /** 这一期相对上一期,**分不分得开「涨跌」和「投入」**。
+   *
+   *  ⚠️ 判据必须走 `Ledger.delta`,**不能直接读 `snap.netInflow`**。
+   *     那个字段是老版本手填的产物,现在已经不写入了 ——
+   *     直接读它的话,你记满一年动作这里也永远是 0 期可用,
+   *     而页面上只会写「还差 3 期」,看不出是代码没接上。
+   *     (这就是本项目记录在案的头号失败模式:写了没接上。) */
+  function inflowOf(snap, prev) {
+    if (!prev) return null;
+    return Ledger.delta(snap, prev).inflow;
+  }
+
+  /** 从最新往回数,**连续**分得开的有几期(含起点那一期)。
    *
    *  ⚠️ 必须连续。中间断一期的话,那一段的涨跌就分不出来了,
    *     而把断掉的两截接起来算,等于假装中间那段没投过钱。 */
   function usable(snaps) {
-    var n = 0;
-    for (var i = (snaps || []).length - 1; i >= 0; i--) {
-      if (!hasFlow(snaps[i])) break;
-      n++;
+    var list = snaps || [];
+    var spans = 0;
+    for (var i = list.length - 1; i >= 1; i--) {
+      if (inflowOf(list[i], list[i - 1]) == null) break;
+      spans++;
     }
-    // 最早那一期只作为起点(它自己的 netInflow 用不上),所以区间数 = n − 1。
-    // 但起点那期必须存在 —— 往前多要一期。
-    return n;
+    return spans ? spans + 1 : 0;      // n 个区间要 n+1 期
   }
 
   function gate(snaps) {
@@ -49,8 +57,8 @@ var Stats = (function () {
     if (have >= MIN_PERIODS) return { ok: true, have: have };
     return { ok: false, have: have, need: MIN_PERIODS,
              why: have === 0
-               ? '还没有一期记过「本期净投入」—— 没有它就分不清涨跌和申购'
-               : '连着记了 ' + have + ' 期,还差 ' + (MIN_PERIODS - have) + ' 期' };
+               ? '还没有哪一期分得开「涨跌」和「投入」—— 从记第一笔买卖开始就有了'
+               : '已经连着 ' + have + ' 期分得开了,还差 ' + (MIN_PERIODS - have) + ' 期' };
   }
 
   /** 时间加权收益率 —— 每个区间算一次,连乘。
@@ -68,7 +76,7 @@ var Stats = (function () {
     for (var i = 1; i < list.length; i++) {
       var begin = total(list[i - 1]);
       if (begin <= 0) continue;
-      var end = total(list[i]) - list[i].netInflow;
+      var end = total(list[i]) - inflowOf(list[i], list[i - 1]);
       product *= end / begin;
       periods++;
     }
@@ -90,7 +98,8 @@ var Stats = (function () {
     var t0 = list[0].date;
     var cf = [{ date: t0, amount: -total(list[0]) }];
     for (var i = 1; i < list.length; i++) {
-      if (list[i].netInflow) cf.push({ date: list[i].date, amount: -list[i].netInflow });
+      var inf = inflowOf(list[i], list[i - 1]);
+      if (inf) cf.push({ date: list[i].date, amount: -inf });
     }
     cf.push({ date: list[list.length - 1].date, amount: total(list[list.length - 1]) });
 
@@ -191,7 +200,7 @@ var Stats = (function () {
     return Math.pow(1 + rate, 365 / days) - 1;
   }
 
-  return { MIN_PERIODS: MIN_PERIODS, usable: usable, gate: gate,
+  return { MIN_PERIODS: MIN_PERIODS, usable: usable, gate: gate, inflowOf: inflowOf,
            twr: twr, xirr: xirr, composition: composition,
            contribution: contribution, annualize: annualize };
 })();

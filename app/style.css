@@ -482,3 +482,89 @@ input:focus, select:focus {
           margin-top: var(--s2); font-size: var(--t-xs); color: var(--text-dim); }
 .legend .lg { display: inline-flex; align-items: center; gap: 5px; }
 .legend .lg i { width: 9px; height: 9px; border-radius: 2px; flex: none; }
+
+/* ============================================================
+   视觉:克制精致
+   ============================================================
+   ⚠️ 改这一版的起因是「简陋、不够精致」。而问题不在令牌
+      (间距字号早就成体系了),在**角色**:
+      首屏的 h1 是一个金额,历史页的 h1 是「历史」两个字 ——
+      同一个样式扛两种完全不同的东西,所以哪边都不出彩。
+
+   ⚠️ 这一套的原则是「让数字当主角」:
+      钱的界面里,人是来读数的,标题只是路牌。
+      所以数字给大字号 + 等宽数位 + 紧字距,
+      标签一律降到 12px、调淡、加字间距 —— 对比拉开,层次自然出来。
+      不靠阴影和渐变堆效果,那些在小屏上只会让数字更难读。 */
+
+/* ---- 数字:全局等宽数位 ----
+   ⚠️ 没有它,金额在列表里逐行错位(1 比 8 窄一大截),
+      扫一眼看不出哪个大 —— 这是「简陋」最具体的来源之一。 */
+.num, .hero-num, .stat-v, .list-row .amt, .money {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+  letter-spacing: -.01em;
+}
+
+/* ---- 首屏的总额:唯一的主视觉 ---- */
+.hero { padding: var(--s2) 0 var(--s5); }
+.hero-num {
+  font-size: 34px; font-weight: 680; line-height: 1.15;
+  letter-spacing: -.025em; margin: 0;
+}
+.hero-sub {
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--s1) var(--s3);
+  margin-top: var(--s2); font-size: var(--t-sm); color: var(--text-dim);
+}
+.hero-sub .k { color: var(--text-dim2); }
+.hero-sub .v { color: var(--text-dim); font-variant-numeric: tabular-nums; }
+
+/* 日期状态用胶囊 —— 比一行灰字更容易被扫到,又不像红字那样喊 */
+.pill {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 9px; border-radius: var(--r-full);
+  font-size: var(--t-xs); font-weight: 500;
+  background: var(--surface-2); color: var(--text-dim);
+}
+.pill.warn { background: var(--warn-dim); color: var(--warn); }
+
+/* ---- 分区标题:降成路牌,别跟数字抢 ---- */
+h2 {
+  font-size: var(--t-sm); font-weight: 600; color: var(--text-dim);
+  letter-spacing: .04em; margin: var(--s5) 0 var(--s2);
+}
+h2 .n { color: var(--text-dim2); font-weight: 500; margin-left: var(--s1);
+        font-variant-numeric: tabular-nums; }
+
+/* ---- 列表行:主行 / 副行 / 金额 三层 ---- */
+.list-row .ttl  { font-weight: 560; letter-spacing: -.005em; }
+.list-row .sub2 { font-size: var(--t-xs); color: var(--text-dim2); margin-top: 2px;
+                  line-height: 1.45; }
+.list-row .amt  { font-weight: 600; text-align: right; white-space: nowrap;
+                  font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+.list-row .amt .u { font-size: var(--t-xs); color: var(--text-dim2);
+                    font-weight: 500; margin-right: 1px; }
+
+/* 行尾的指示符 —— 比 ▸ 轻,只是暗示可点 */
+.chev { flex: none; width: 7px; height: 7px; margin-left: 2px;
+        border-right: 1.5px solid var(--border-2);
+        border-bottom: 1.5px solid var(--border-2);
+        transform: rotate(-45deg); }
+
+/* ---- 进度条:更细,底色更淡 ---- */
+.bar { height: 5px; margin-top: 6px; background: var(--surface-3); }
+.bar i { transition: width .3s var(--ease); }
+/* 超配的用暖色,一眼分得出「缺」和「超」 */
+.bar.over i { background: var(--warn); }
+
+/* ---- 图表 ---- */
+.chart svg { border-radius: var(--r-sm); }
+
+/* ---- tab 栏 ---- */
+.tabbar button .ic { font-size: 17px; line-height: 1; }
+.tabbar button { gap: 3px; letter-spacing: .02em; }
+
+/* ---- 空状态:别只放个图标 ---- */
+.empty { padding: var(--s6) var(--s4); }
+.empty .big { font-size: 30px; opacity: .35; margin-bottom: var(--s3); }
+.empty .hint { max-width: 26em; margin-left: auto; margin-right: auto; }

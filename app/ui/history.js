@@ -83,10 +83,11 @@ var HistoryUI = (function () {
         else if (t) bits.push('计划 ¥' + money(t.target));
         fl.appendChild(h('div', { class: 'list-row' }, [
           h('div', { class: 'body' }, [
-            h('div', { class: 'ttl' }, [
-              (f.kind === 'sell' ? '卖 ' : '买 ') + f.category + '　¥' + money(f.amount),
-            ]),
+            h('div', { class: 'ttl' }, [(f.kind === 'sell' ? '卖 ' : '买 ') + f.category]),
             h('div', { class: 'sub2' }, [bits.join(' · ')]),
+          ]),
+          h('div', { class: 'amt' }, [
+            h('span', { class: 'u' }, [f.kind === 'sell' ? '−¥' : '¥']), money(f.amount),
           ]),
         ]));
       });
@@ -103,14 +104,15 @@ var HistoryUI = (function () {
           class: 'list-row', onclick: function () { reconsider(t); },
         }, [
           h('div', { class: 'body' }, [
-            h('div', { class: 'ttl' }, [
-              (t.kind === 'sell' ? '卖 ' : '买 ') + t.category + '　¥' + money(t.target),
-            ]),
+            h('div', { class: 'ttl' }, [(t.kind === 'sell' ? '卖 ' : '买 ') + t.category]),
             h('div', { class: 'sub2' }, [
-              (t.reason || '没写理由') + ' · ' + md(t.doneAt) + ' · 点一下重新考虑',
+              (t.reason || '没写理由') + ' · ' + md(t.doneAt),
             ]),
           ]),
-          h('span', { class: 'dim' }, ['▸']),
+          h('div', { class: 'amt dim' }, [
+            h('span', { class: 'u' }, ['¥']), money(t.target),
+          ]),
+          h('span', { class: 'chev' }),
         ]));
       });
       w.appendChild(dl);
@@ -126,7 +128,7 @@ var HistoryUI = (function () {
         class: 'list-row', onclick: function () { tapSnapshot(s, d); },
       }, [
         h('div', { class: 'body' }, [
-          h('div', { class: 'ttl' }, [s.date + '　¥' + money(d.total)]),
+          h('div', { class: 'ttl' }, [s.date]),
           h('div', { class: 'sub2' }, [
             // ⚠️ 三种情况说三句不同的话:第一期 / 分得开 / 分不开。
             //    第三种最要紧 —— 不许拿总额当涨跌。
@@ -137,15 +139,14 @@ var HistoryUI = (function () {
           ]),
         ]),
       ]);
-      if (d.market != null) {
-        // ⚠️ 涨跌**不着色**。样式表开头就写着「钱的事不用高饱和,也不该是绿的」——
-        //    而且涨红跌绿还是涨绿跌红,中西正好相反,一眼看去容易读反。
-        //    `+` / `−` 本来就说清楚了。
-        row.appendChild(h('div', { class: 'num', style: 'font-weight:600' },
-                          [signed(d.market)]));
-      } else if (d.change != null) {
-        row.appendChild(h('span', { class: 'dim xs' }, ['涨跌未知']));
-      }
+      // ⚠️ 涨跌**不着色**。样式表开头就写着「钱的事不用高饱和,也不该是绿的」——
+      //    而且涨红跌绿还是涨绿跌红,中西正好相反,一眼看去容易读反。
+      //    `+` / `−` 本来就说清楚了。
+      row.appendChild(h('div', { class: 'amt' }, [
+        h('span', { class: 'u' }, ['¥']), money(d.total),
+        h('div', { class: 'sub2', style: 'font-weight:500' },
+          [d.market != null ? signed(d.market) : d.change != null ? '涨跌未知' : '']),
+      ]));
       sl.appendChild(row);
     });
     w.appendChild(sl);

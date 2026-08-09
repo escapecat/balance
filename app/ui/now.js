@@ -72,13 +72,27 @@ var NowUI = (function () {
     var extT = Assets.total(snap);
     var ext = extT.sum, extBlank = extT.blank;
 
-    // ---- 总额 ----
-    w.appendChild(h('h1', {}, ['¥' + money(sm.total + ext)]));
-    var sub = '组合 ' + money(sm.total) + (ext ? '　组合外 ' + money(ext) : '');
-    w.appendChild(h('p', { class: 'sub' }, [
-      sub + '　·　' + snap.date.slice(5).replace('-', '月') + '日录的' +
-      (age > 0 ? ',' + age + ' 天前' : ''),
+    // ---- 总额:这一页唯一的主视觉 ----
+    //
+    // ⚠️ 用 .hero 而不是 h1。别的页面的 h1 是「历史」「设置」这种路牌,
+    //    而这里是一个**要被读的数**。同一个样式扛两种角色,哪边都不出彩。
+    var hero = h('div', { class: 'hero' });
+    hero.appendChild(h('div', { class: 'hero-num' }, ['¥' + money(sm.total + ext)]));
+    var sub = h('div', { class: 'hero-sub' });
+    sub.appendChild(h('span', {}, [
+      h('span', { class: 'k' }, ['组合 ']), h('span', { class: 'v' }, [money(sm.total)]),
     ]));
+    if (ext) {
+      sub.appendChild(h('span', {}, [
+        h('span', { class: 'k' }, ['组合外 ']), h('span', { class: 'v' }, [money(ext)]),
+      ]));
+    }
+    sub.appendChild(h('span', { class: 'pill' + (stale ? ' warn' : '') }, [
+      snap.date.slice(5).replace('-', '/') + (age > 0 ? ' · ' + age + ' 天前' : ' · 今天'),
+    ]));
+    hero.appendChild(sub);
+    w.appendChild(hero);
+
     if (extBlank.length) {
       w.appendChild(h('div', {
         class: 'note', style: 'margin-bottom:12px', onclick: function () { onEntry(); },
@@ -113,11 +127,12 @@ var NowUI = (function () {
     if (mode.mode === 'monthly') {
       var p = plan;
       if (p.today.length) {
-        body.appendChild(h('h2', {}, ['今天可以做完 · ¥' + money(p.spentToday)]));
+        body.appendChild(h('h2', {}, ['今天可以做完',
+          h('span', { class: 'n' }, ['¥' + money(p.spentToday)])]));
         var l1 = h('div', { class: 'list' });
         p.today.forEach(function (t) {
           l1.appendChild(todoRow(todoOf[Todos.keyOf('buy', t.fund.code)], t,
-                                 (t.fund.name || t.fund.code) + ' · 无限额'));
+                                 t.fund.name || t.fund.code));
         });
         body.appendChild(l1);
       }
@@ -127,8 +142,8 @@ var NowUI = (function () {
         p.daily.forEach(function (d) {
           l2.appendChild(todoRow(todoOf[Todos.keyOf('buy', d.fund.code)], d,
                                  (d.fund.name || d.fund.code) + ' · 还要 ' + d.days +
-                                 ' 个交易日,共 ¥' + money(d.amount),
-                                 d.category + '　¥' + money(d.perDay) + ' / 日'));
+                                 ' 天,共 ¥' + money(d.amount),
+                                 d.category));
         });
         body.appendChild(l2);
       }
@@ -149,13 +164,13 @@ var NowUI = (function () {
       var la = h('div', { class: 'list' });
       a.sells.forEach(function (x) {
         la.appendChild(todoRow(todoOf[Todos.keyOf('sell', x.fund.code)], x,
-                               x.fund.name || x.fund.code,
-                               '卖 ' + x.category + '　¥' + money(x.amount)));
+                               x.fund.name || x.fund.code, '卖 ' + x.category));
       });
       a.buys.forEach(function (x) {
         la.appendChild(todoRow(todoOf[Todos.keyOf('buy', x.fund.code)], x,
                                (x.fund.name || x.fund.code) +
-                               (x.perDay ? ' · ' + money(x.perDay) + '/日 × ' + x.days + ' 天' : '')));
+                               (x.perDay ? ' · ' + x.days + ' 天投完' : ''),
+                               '买 ' + x.category));
       });
       body.appendChild(la);
       (a.skipped || []).forEach(function (s2) {
@@ -190,20 +205,26 @@ var NowUI = (function () {
         // 条的长度 = **相对目标的完成度**(12.4% / 20% = 62%),不是占总资产的比例。
         // 后者在六个类别之间长度差得太小,一眼分不出谁欠得多 ——
         // 而这一页存在的理由就是「一眼看出哪儿不对」。
+        //
+        // 超配的条子用暖色:同样是「满格」,一个是到位了、一个是溢出了,
+        // 光看长度分不出来 —— 而这两件事要采取的行动正好相反。
+        var over = r.gap < 0;
         var fill = r.target > 0 ? Math.min(100, r.pct / r.target * 100) : 0;
-        b2.appendChild(h('div', { class: 'bar' }, [h('i', { style: 'width:' + fill + '%' })]));
+        b2.appendChild(h('div', { class: 'bar' + (over ? ' over' : '') },
+                        [h('i', { style: 'width:' + fill + '%' })]));
         b2.appendChild(h('div', { class: 'sub2' }, [
-          pct(r.pct) + ' / 目标 ' + pct(r.target) +
-          (Math.abs(r.gap) > 500 ? '　' + (r.gap > 0 ? '缺 ' : '超 ') + money(Math.abs(r.gap)) : ''),
+          pct(r.pct) + ' / ' + pct(r.target) +
+          (Math.abs(r.gap) > 500 ? ' · ' + (over ? '超 ' : '缺 ') + money(Math.abs(r.gap)) : ''),
         ]));
       } else {
         b2.appendChild(h('div', { class: 'sub2' }, [
-          pct(r.pct) + ' · 不在目标比例里,不参与再平衡 —— 去设置补一条',
+          pct(r.pct) + ' · 不在目标比例里 —— 去设置补一条',
         ]));
       }
       row.appendChild(b2);
-      row.appendChild(h('div', { class: 'num', style: 'text-align:right;font-weight:600' },
-                        ['¥' + money(r.value)]));
+      row.appendChild(h('div', { class: 'amt' }, [
+        h('span', { class: 'u' }, ['¥']), money(r.value),
+      ]));
       lc.appendChild(row);
     });
     body.appendChild(lc);
@@ -235,21 +256,24 @@ var NowUI = (function () {
    *  @param t      待办(可能还没建出来 —— 首次渲染时 sync 已经建好了,兜底而已)
    *  @param x      计划里的那一项,用来兜底显示
    *  @param sub    副行
-   *  @param title  主行,不给就用「买 类别 ¥金额」
+   *  @param title  主行,不给就用类别名
+   *
+   *  ⚠️ 金额**单独一列右对齐**,不塞进标题里。
+   *     塞在标题里的话,几行金额长短不一、左边界还被名字顶得七零八落,
+   *     扫一眼根本比不出大小 —— 而「今天该买哪个多」正是你要一眼看到的。
    *
    *  ⚠️ 「从 6/26 挂到现在 · 44 天」用**和基金名同一档的灰字**。
    *     不用红、不用 ⚠、不写「你已经拖了」—— 一条挂了 44 天的待办,
    *     更可能说明它本来就不该在清单里,而不是说明你不守信用。
    */
   function todoRow(t, x, sub, title) {
-    var ttl = title || ((t && t.kind === 'sell' ? '卖 ' : '买 ') +
-                        x.category + '　¥' + money(x.amount));
+    var ttl = title || ((t && t.kind === 'sell' ? '卖 ' : '买 ') + x.category);
     var body2 = h('div', { class: 'body' }, [h('div', { class: 'ttl' }, [ttl])]);
 
     var bits = [sub];
     if (t) {
       var days = Todos.pendingDays(t, today());
-      if (days != null && days >= 7) bits.push('从 ' + t.bornAt.slice(5) + ' 挂到现在 · ' + days + ' 天');
+      if (days != null && days >= 7) bits.push('挂了 ' + days + ' 天');
       if (t.status === 'partial') bits.push('已投 ¥' + money(t.actual));
     }
     body2.appendChild(h('div', { class: 'sub2' }, [bits.filter(Boolean).join(' · ')]));
@@ -259,11 +283,19 @@ var NowUI = (function () {
       class: 'list-row' + (done ? ' dim' : ''),
       onclick: t ? function () { tapTodo(t); } : null,
     }, [body2]);
-    row.appendChild(h('span', { class: 'dim' }, [
+
+    // 金额自成一列 —— 等宽数位,右对齐,一眼可比
+    row.appendChild(h('div', { class: 'amt' }, [
+      h('span', { class: 'u' }, ['¥']),
+      money(x.perDay != null ? x.perDay : x.amount),
+      x.perDay != null ? h('span', { class: 'u' }, [' /日']) : '',
+    ].filter(function (n) { return n !== ''; })));
+
+    row.appendChild(h('span', { class: 'dim', style: 'width:2.2em;text-align:right' }, [
       !t ? '' :
       t.status === 'done' ? '✓' :
-      t.status === 'resolved' ? '已达标' :
-      t.status === 'dropped' ? '不做了' : '○',
+      t.status === 'resolved' ? '达标' :
+      t.status === 'dropped' ? '—' : '○',
     ]));
     return row;
   }

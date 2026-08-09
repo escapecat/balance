@@ -80,10 +80,9 @@ var StatsUI = (function () {
         g.why + '。',
       ]));
       w.appendChild(h('div', { class: 'hint' }, [
-        '收益率要能算,得知道**每一期你自己投进去多少** —— ' +
-        '不然总额涨了,分不清是赚的还是又投的。' +
-        '录入页最后一栏「本期净投入」就是干这个的,' +
-        '连着记满 ' + Stats.MIN_PERIODS + ' 期这里就有数了。',
+        '收益率要能算,得先分得开「涨了多少」和「你又投了多少」。' +
+        '**记买卖就够了** —— 剩下的是解出来的。' +
+        '连着 ' + Stats.MIN_PERIODS + ' 期都有记录,这里就有数了。',
       ]));
     } else {
       var tw = Stats.twr(snaps), xi = Stats.xirr(snaps);
@@ -157,7 +156,7 @@ var StatsUI = (function () {
               '投入 ' + signed(r.inflow) + '　涨跌 ' + signed(r.market),
             ]),
           ]),
-          h('div', { class: 'num', style: 'font-weight:600' }, [signed(r.market)]),
+          h('div', { class: 'amt' }, [signed(r.market)]),
         ]));
       });
       w.appendChild(cl);
@@ -177,8 +176,8 @@ var StatsUI = (function () {
           sub + (annual != null ? '　年化 ' + pct(annual) : ''),
         ]),
       ]),
-      h('div', { class: 'num', style: 'font-weight:600' }, [
-        rate == null ? '算不出' : (rate > 0 ? '+' : '') + pct(rate),
+      h('div', { class: 'amt' }, [
+        rate == null ? '—' : (rate > 0 ? '+' : '') + pct(rate),
       ]),
     ]);
   }

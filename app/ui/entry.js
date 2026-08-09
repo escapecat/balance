@@ -16,6 +16,8 @@
 var EntryUI = (function () {
 
   var el, draft = null, onDone = null;
+  // 底部对账区的当前节点 + 它依赖的上一期 —— 输入时要就地换掉它
+  var sumBox = null, sumPrev = null;
 
   function h(tag, attrs, kids) {
     var n = document.createElement(tag);
@@ -70,7 +72,16 @@ var EntryUI = (function () {
       // ⚠️ value 恒为空,上次的值只做 placeholder。见文件头那段。
       value: bag[key] == null ? '' : bag[key],
       placeholder: prev == null ? '' : money(prev),
-      oninput: function (e) { bag[key] = e.target.value; refresh(); },
+      oninput: function (e) {
+        bag[key] = e.target.value;
+        refresh();
+        // ⚠️ **底部对账区必须跟着一起变。**
+        //    第一版只刷新了这一行右边的 delta,底部那块「合计 / 工资−花费 /
+        //    市场涨跌」是进页面时算的一次,之后你怎么改它都不动 ——
+        //    而那块是这一页存在的理由(抄完当场核对)。不动等于没有。
+        //    整页 render() 不行:输入框会重建,焦点和光标位置全丢。
+        refreshSummary();
+      },
       onblur: saveDraft,
       style: 'width:7.5em;text-align:right',
     });
@@ -119,9 +130,7 @@ var EntryUI = (function () {
       w.appendChild(h('div', { class: 'sec-h' }, [cat]));
       var list = h('div', { class: 'list' });
       byCat[cat].forEach(function (f) {
-        var sub = f.code + (f.dailyLimit ? ' · 日限额 ' + money(f.dailyLimit) : '');
-        if (f.active === false) sub += ' · 未启用';
-        list.appendChild(numRow(f.name || f.code, sub, draft.holdings, f.code,
+        list.appendChild(numRow(f.name || f.code, f.code, draft.holdings, f.code,
                                 prev.holdings[f.code]));
       });
       w.appendChild(list);
@@ -173,7 +182,9 @@ var EntryUI = (function () {
     //
     //    下面这块顺便把解出来的数当场显示 —— **抄完就能核对**,
     //    离谱的话多半是漏记了一笔买卖,而不是你真的花了那么多。
-    w.appendChild(summary(prev));
+    sumPrev = prev;
+    sumBox = summary(prev);
+    w.appendChild(sumBox);
 
     w.appendChild(h('button', {
       class: 'btn', style: 'margin-top:16px', onclick: submit,
@@ -184,6 +195,14 @@ var EntryUI = (function () {
     }, ['先不存,回去']));
 
     el.appendChild(w);
+  }
+
+  /** 就地换掉底部对账区。**不重建输入框** —— 那会丢焦点和光标位置。 */
+  function refreshSummary() {
+    if (!sumBox || !sumBox.parentNode) return;
+    var fresh = summary(sumPrev);
+    sumBox.parentNode.replaceChild(fresh, sumBox);
+    sumBox = fresh;
   }
 
   /** 底部对账 —— 抄错的话在这儿现形 */
@@ -221,9 +240,17 @@ var EntryUI = (function () {
     //    等你翻到历史页才看见的话,当时的记忆已经没了。
     if (d.source === 'actions') {
       var box2 = h('div', { style: 'margin-top:8px' });
+      // ⚠️ **把构成写出来。** 算出个 0 却不说为什么,看着就像坏了 ——
+      //    而 0 的成因几乎总是「现金那几栏留空了」:留空 = 沿用上次 = 现金没变,
+      //    于是工具认为你这个月一分钱没进过。
+      //    工资是体现在**现金余额**上的,不照实抄就没有。
+      var dCash = Portfolio.sum(built.snapshot.cash) - Portfolio.sum(prev.cash || {});
       box2.appendChild(h('div', { class: 'between' }, [
         h('span', { class: 'xs dim' }, ['工资 − 花费']),
         h('span', {}, [signed(d.inflow)]),
+      ]));
+      box2.appendChild(h('div', { class: 'xs dim', style: 'text-align:right;margin-top:-2px' }, [
+        '= 现金变化 ' + signed(dCash) + (d.netBuy ? ' + 买卖 ' + signed(d.netBuy) : ''),
       ]));
       box2.appendChild(h('div', { class: 'between' }, [
         h('span', { class: 'xs dim' }, ['市场涨跌']),
@@ -236,6 +263,15 @@ var EntryUI = (function () {
         ]));
       }
       box.appendChild(box2);
+      // ⚠️ 现金一分没变**几乎一定是漏抄了**,不是真的没变 ——
+      //    工资进账、日常开销都走现金账户,一个月下来正好持平的概率极低。
+      if (Math.abs(dCash) < 1) {
+        box.appendChild(h('div', { class: 'note warn', style: 'margin-top:8px' }, [
+          '现金三栏和上次**一模一样** —— 是不是没抄?' +
+          '工资和花费都体现在现金余额上,不照实填的话「工资 − 花费」永远是 0。',
+        ]));
+      }
+
       // 离谱值兜底。阈值取「一个月净流出超过组合的 5%」——
       // 真发生这种事你自己知道;而更常见的原因是漏记了一笔买入。
       if (d.inflow < 0 && Math.abs(d.inflow) > d.total * 0.05) {
@@ -267,6 +303,36 @@ var EntryUI = (function () {
 
     // ⚠️ 显式填 0 = 清仓,得确认一次。这是唯一会「把一整只基金抹掉」的输入,
     //    而抹掉之后从总额上完全看不出来 —— 你只会以为市场跌了。
+    var zeroed = [];
+    Object.keys(draft.holdings || {}).forEach(function (k) {
+      if (Ledger.parse(draft.holdings[k]) === 0 && prev && prev.holdings[k] > 0) zeroed.push(k);
+    });
+    // ⚠️ **一项都没填就保存 = 原样复制上一期。**
+    //    留空是「沿用上次」,全留空就是「这个月一切没变」——
+    //    而那几乎不可能。真存下去的话:涨跌 0、工资 0、清单不变,
+    //    看着像工具坏了,实际是多了一期空数据。
+    var touched = 0;
+    [draft.holdings, draft.cash, draft.external].forEach(function (bag) {
+      Object.keys(bag || {}).forEach(function (k) {
+        if (!Ledger.isEmpty(bag[k])) touched++;
+      });
+    });
+    if (!touched) {
+      Modal.confirm({
+        title: '一项都没填 —— 确定要存吗?',
+        body: '留空的意思是「沿用上次」,所以这一期会和上一期**一模一样**:' +
+              '涨跌 0、工资 − 花费 0、清单也不会变。' +
+              '要记这个月的变化,得把基金 app 里的数字抄进来 ——' +
+              '尤其是**现金那几栏**,工资和花费都体现在那儿。',
+        ok: '还是存', danger: true,
+      }).then(function (yes) { if (yes) doSubmit(built); });
+      return;
+    }
+    doSubmit(built);
+  }
+
+  function doSubmit(built) {
+    var prev = Ledger.latest(snapshots());
     var zeroed = [];
     Object.keys(draft.holdings || {}).forEach(function (k) {
       if (Ledger.parse(draft.holdings[k]) === 0 && prev && prev.holdings[k] > 0) zeroed.push(k);

@@ -46,6 +46,7 @@ var HistoryUI = (function () {
            '-' + ('0' + d.getDate()).slice(-2);
   }
 
+  var viewing = null;    // 正在看哪一期的详情
   var SHOW = 8;          // 列表默认显示几条
   var expanded = {};     // 哪几段被展开了
 
@@ -71,6 +72,8 @@ var HistoryUI = (function () {
 
   function render() {
     el.innerHTML = '';
+    // 看某一期的详情时**整屏接管** —— 和录入页、基金表单同一个模式
+    if (viewing) { el.appendChild(snapshotView()); return; }
     var w = h('div', { class: 'wrap' });
     var snaps = (Store.get('snapshots', []) || []).slice();
     var todos = Todos.all();
@@ -155,7 +158,7 @@ var HistoryUI = (function () {
       var prev = arr[i + 1];
       var d = Ledger.delta(s, prev);
       var row = h('div', {
-        class: 'list-row', onclick: function () { tapSnapshot(s, d); },
+        class: 'list-row', onclick: function () { openSnapshot(s); },
       }, [
         h('div', { class: 'body' }, [
           h('div', { class: 'ttl' }, [s.date]),
@@ -225,81 +228,129 @@ var HistoryUI = (function () {
     el.appendChild(w);
   }
 
-  /** 点某一期 —— 目前只有「删掉」一个动作。
+  /** 点某一期 → 进详情屏。
    *
-   *  ⚠️ 不做「编辑这一期」。改历史看着方便,但它会让**过去的数字变成可疑的** ——
-   *     那些是你当时真实从基金 app 上抄下来的,改了就再也对不回去。
-   *     录错了就删掉重录一遍,一次两分钟,换来的是历史永远可信。
+   *  ⚠️ 早先这里是「弹个菜单 → 再弹个纯文本框」。
+   *     `Modal.note` 只能吐字符串,于是逐只盈亏被硬拼成几行文本:
+   *     金额没法右对齐、没有分隔线、长基金名和数字挤在一起 —— 难看是必然的。
+   *     **拿弹窗当页面用,做出来一定丑。** 弹窗是用来说一句话的。
    */
-  function tapSnapshot(s, d) {
-    // ⚠️ 逐只基金的盈亏放在这儿,而不是首屏 ——
-    //    「这个月哪只赚了」是**回顾**时的问题,不是「今天该做什么」的问题。
-    //    塞进首屏的话,那一屏就从「该做什么」变成「看看行情」了。
-    var snaps = Store.get('snapshots', []) || [];
-    var i = snaps.findIndex(function (x) { return x.date === s.date; });
-    var prev = i > 0 ? snaps[i - 1] : null;
-    var pf = prev ? Ledger.perFund(s, prev) : null;
-
-    var opts = [];
-    if (pf) opts.push({ key: 'funds', label: '这一期各只赚了多少',
-                        hint: '市值变化减掉你买进去的钱' });
-    opts.push({ key: 'del', label: '删掉这一期', danger: true,
-                hint: '录错了就删掉重录 —— 这一页不提供「改」' });
-
-    Modal.pick({
-      title: s.date,
-      hint: '组合 ¥' + money(d.total) +
-            (d.market == null ? ' · 涨跌未知' : ' · 涨跌 ' + signed(d.market)),
-      options: opts,
-    }).then(function (v) {
-      if (v === 'funds') { showPerFund(s, pf); return; }
-      if (v !== 'del') return;
-      // ⚠️ 删掉一期会让**它之后那一期的涨跌重新算**(基准变了)。
-      //    不说的话你会发现别的月份数字也变了,而完全想不到是这一下删的。
-      var snaps = Store.get('snapshots', []) || [];
-      var i = snaps.findIndex(function (x) { return x.date === s.date; });
-      var next = i >= 0 && i < snaps.length - 1 ? snaps[i + 1].date : null;
-      Modal.confirm({
-        title: '删掉 ' + s.date + ' 这一期?',
-        body: (next ? '⚠️ ' + next + ' 那一期的涨跌会跟着重算 —— 基准变了。\n\n' : '') +
-              '删之前会自动存一个回滚点,设置页里能退回来。',
-        ok: '删掉', danger: true,
-      }).then(function (ok) {
-        if (!ok) return;
-        var r = Ledger.removeSnapshot(s.date);
-        if (!r.ok) { Modal.note({ title: '删不掉', body: r.why }); return; }
-        if (onChanged) onChanged();
-        render();
-      });
-    });
+  function openSnapshot(s0) {
+    var all = Store.get('snapshots', []) || [];
+    var i = all.findIndex(function (x) { return x.date === s0.date; });
+    viewing = { snap: s0, prev: i > 0 ? all[i - 1] : null,
+                next: i < all.length - 1 ? all[i + 1].date : null };
+    render();
   }
 
-  /** 这一期各只赚了多少 —— 涨跌和你买进去的钱**分开列**。
-   *
-   *  ⚠️ 只列涨跌的话,买得多的那只看起来总是「涨得最好」。
-   *     两栏并排才看得出「这只是真涨了,那只只是我买多了」。 */
-  function showPerFund(s, pf) {
+  /** 某一期的详情屏 —— 那天的账、各只赚了多少、以及删除入口。 */
+  function snapshotView() {
+    var v = viewing;
+    var w = h('div', { class: 'wrap' });
+    var d = Ledger.delta(v.snap, v.prev);
     var st = Store.get('settings', {}) || {};
     var name = {};
-    (st.funds || []).forEach(function (f) { name[f.code] = f.name || f.code; });
-    var rows = pf.filter(function (r) {
+    Config.allKnown(st).forEach(function (f) { name[f.code] = f.name || f.code; });
+
+    w.appendChild(h('h1', {}, [v.snap.date]));
+
+    // 那天的账 —— 和首页 hero 一个格式,不用重新适应
+    var hero = h('div', { class: 'hero', style: 'padding-top:0' });
+    hero.appendChild(h('div', { class: 'hero-num' },
+                       ['¥' + money(d.total + (d.external || 0))]));
+    var sub = h('div', { class: 'hero-sub' });
+    sub.appendChild(h('span', {}, [
+      h('span', { class: 'k' }, ['组合 ']), h('span', { class: 'v' }, [money(d.total)]),
+    ]));
+    if (d.external) {
+      sub.appendChild(h('span', {}, [
+        h('span', { class: 'k' }, ['组合外 ']), h('span', { class: 'v' }, [money(d.external)]),
+      ]));
+    }
+    hero.appendChild(sub);
+    w.appendChild(hero);
+
+    if (d.change != null) {
+      w.appendChild(h('div', { class: 'list' }, [
+        infoRow('工资 − 花费', d.inflow == null ? '那时候还没记买卖' : null,
+                d.inflow == null ? '—' : signed(d.inflow)),
+        infoRow('市场涨跌', d.market == null ? '分不出来' : null,
+                d.market == null ? '—' : signed(d.market)),
+        infoRow('总额变化', '相对上一期 ' + (v.prev ? v.prev.date : ''), signed(d.change)),
+      ]));
+    }
+
+    // ---- 各只赚了多少 ----
+    var pf = v.prev ? Ledger.perFund(v.snap, v.prev) : null;
+    var rows = (pf || []).filter(function (r) {
       return Math.abs(r.market) > 1 || Math.abs(r.netBuy) > 1;
     }).sort(function (a, b) { return b.market - a.market; });
 
-    if (!rows.length) {
-      Modal.note({ title: s.date, body: '这一期各只都没什么变化。' });
-      return;
+    if (rows.length) {
+      w.appendChild(h('h2', {}, ['各只赚了多少']));
+      var l = h('div', { class: 'list' });
+      rows.forEach(function (r) {
+        var bits = [];
+        if (Math.abs(r.netBuy) > 1) bits.push('你买了 ' + signed(r.netBuy));
+        if (r.dividend > 1) bits.push('分红 ' + money(r.dividend));
+        bits.push(money(r.from) + ' → ' + money(r.to));
+        l.appendChild(h('div', { class: 'list-row' }, [
+          h('div', { class: 'body' }, [
+            h('div', { class: 'ttl' }, [name[r.code] || r.code]),
+            h('div', { class: 'sub2' }, [bits.join(' · ')]),
+          ]),
+          h('div', { class: 'amt' }, [signed(r.market)]),
+        ]));
+      });
+      w.appendChild(l);
+      var sum = rows.reduce(function (a, r) { return a + r.market; }, 0);
+      w.appendChild(h('div', { class: 'hint' }, [
+        '合计涨跌 **' + signed(sum) + '** · 已经减掉你自己买进去的钱。',
+      ]));
+    } else if (v.prev) {
+      w.appendChild(h('h2', {}, ['各只赚了多少']));
+      w.appendChild(h('div', { class: 'note' }, [
+        pf ? '这一期各只都没什么变化。'
+           : '那时候还没开始记买卖 —— 分不出哪些是涨的、哪些是你买的。',
+      ]));
     }
-    var lines = rows.map(function (r) {
-      return (name[r.code] || r.code) + '\n' +
-             '    涨跌 ' + signed(r.market) +
-             (Math.abs(r.netBuy) > 1 ? '    你买了 ' + signed(r.netBuy) : '') +
-             (r.dividend > 1 ? '    分红 ' + money(r.dividend) : '');
-    });
-    var sum = rows.reduce(function (a, r) { return a + r.market; }, 0);
-    Modal.note({
-      title: s.date + ' 各只盈亏',
-      body: lines.join('\n\n') + '\n\n合计涨跌 ' + signed(sum),
+
+    w.appendChild(h('button', {
+      class: 'btn ghost', style: 'margin-top:20px',
+      onclick: function () { viewing = null; render(); },
+    }, ['返回']));
+    w.appendChild(h('button', {
+      class: 'link danger', style: 'margin-top:8px',
+      onclick: function () { dropSnapshot(v); },
+    }, ['删掉这一期']));
+    return w;
+  }
+
+  function infoRow(label, sub, value) {
+    return h('div', { class: 'list-row' }, [
+      h('div', { class: 'body' }, [
+        h('div', { class: 'ttl' }, [label]),
+        sub ? h('div', { class: 'sub2' }, [sub]) : '',
+      ].filter(function (x) { return x !== ''; })),
+      h('div', { class: 'amt' }, [value]),
+    ]);
+  }
+
+  /** ⚠️ 删掉一期会让**它之后那一期的涨跌重新算**(基准变了)。
+   *     不说的话你会发现别的月份数字也变了,而完全想不到是这一下删的。 */
+  function dropSnapshot(v) {
+    Modal.confirm({
+      title: '删掉 ' + v.snap.date + ' 这一期?',
+      body: (v.next ? '⚠️ ' + v.next + ' 那一期的涨跌会跟着重算 —— 基准变了。' : '') +
+            '删之前会自动存一个回滚点,设置页里能退回来。',
+      ok: '删掉', danger: true,
+    }).then(function (ok) {
+      if (!ok) return;
+      var r = Ledger.removeSnapshot(v.snap.date);
+      if (!r.ok) { Modal.note({ title: '删不掉', body: r.why }); return; }
+      viewing = null;
+      if (onChanged) onChanged();
+      render();
     });
   }
 
@@ -320,6 +371,7 @@ var HistoryUI = (function () {
   function mount(node, opts) {
     el = node;
     onChanged = (opts || {}).onChanged;
+    viewing = null;
     render();
   }
 

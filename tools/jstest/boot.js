@@ -34,6 +34,12 @@ El.prototype.insertBefore = function (n, ref) {
   if (i < 0) this.children.push(n); else this.children.splice(i, 0, n);
   return n;
 };
+El.prototype.replaceChild = function (n, old) {
+  var i = this.children.indexOf(old);
+  n.parentNode = this;
+  if (i >= 0) this.children[i] = n; else this.children.push(n);
+  return old;
+};
 El.prototype.setAttribute = function (k, v) { this.attrs[k] = v; };
 El.prototype.getAttribute = function (k) { return this.attrs[k]; };
 El.prototype.addEventListener = function (k, f) { (this.handlers[k] = this.handlers[k] || []).push(f); };

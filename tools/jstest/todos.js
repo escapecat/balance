@@ -96,6 +96,34 @@ ok(get('buy:000216').status === 'done', '同一期内保持 done(实得 ' +
    get('buy:000216').status + ')');
 ok(Todos.flows().length === 1, '不许多出一条现金流');
 
+// ---- 7b. ★ 达标之后计划里又出现了 → 必须退回 open ----
+//
+// 界面上同时显示「买 中短债 ¥X」和「达标」是自相矛盾的:
+// resolved 的意思就是「计划里没有这一条了」。
+// 而**同一期内计划是会变的** —— 改一次现金保底,可投的钱变多,
+// 某一类就重新进了清单。早先这里只按「换没换期」判断,于是状态卡住不动。
+mem.todos = []; mem.flows = [];
+Todos.sync({ today: [GOLD] }, '2026-07-30', '2026-08-09');
+Todos.sync({ today: [] }, '2026-07-30', '2026-08-09');
+ok(get('buy:000216').status === 'resolved', '计划里没了应该是 resolved');
+Todos.sync({ today: [{ category: '黄金', fund: GOLD.fund, amount: 12345 }] },
+           '2026-07-30', '2026-08-09');
+var back = get('buy:000216');
+ok(back.status === 'open',
+   '★ 计划里又有了却还挂着「达标」—— 清单和状态互相打脸(实得 ' + back.status + ')');
+ok(back.target === 12345, '金额跟着新计划走');
+ok(Todos.flows().length === 0, '这一来一回不许产生现金流');
+
+// 对比:done **不能**因为同一期重算就退回 open ——
+// 那会让你以为刚才勾的那一下没生效,再勾一次就多一条假流水
+mem.todos = []; mem.flows = [];
+Todos.sync({ today: [GOLD] }, '2026-07-30', '2026-08-09');
+Todos.complete('buy:000216', 60000, '2026-08-09');
+Todos.sync({ today: [{ category: '黄金', fund: GOLD.fund, amount: 999 }] },
+           '2026-07-30', '2026-08-09');
+ok(get('buy:000216').status === 'done',
+   '★ 同一期内 done 被重算冲掉了(实得 ' + get('buy:000216').status + ')');
+
 // ---- 8. 换一期之后是新一轮,bornAt 重置 ----
 Todos.sync({ today: [{ category: '黄金', fund: GOLD.fund, amount: 30000 }] },
            '2026-08-30', '2026-08-30');

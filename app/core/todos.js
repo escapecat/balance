@@ -79,14 +79,30 @@ var Todos = (function () {
         return;
       }
 
-      // done / resolved 且**换了一期** → 新的一轮,上一笔的账已经结清了
+      // ⚠️ **`resolved` 一旦在计划里重新出现,就必须退回 `open`。**
+      //    resolved 的语义是「计划里没有这一条了」(缺口被市值涨平)。
+      //    而它现在又出现在计划里 —— 那它本来就不该还挂着「达标」。
+      //    不处理的话界面上会同时显示「买 中短债 ¥X」和「达标」,
+      //    两个说法互相打脸,而你不知道该信哪个。
+      //
+      //    这不是假想:改一次现金保底,可投的钱变多,某一类就重新进了清单 ——
+      //    **同一期内计划是会变的**,而早先这里只按「换没换期」判断。
+      if (t.status === 'resolved') {
+        Object.assign(t, fresh, { status: 'open', actual: null, doneAt: null });
+        return;
+      }
+
+      // done 且**换了一期** → 新的一轮,上一笔的账已经结清了
       if (t.lastSnap !== snapDate) {
         Object.assign(t, fresh, {
           status: 'open', actual: null, doneAt: null, bornAt: today, reason: null,
         });
         return;
       }
-      // done / resolved 且还在同一期 → 保持原样,只是金额跟着显示
+      // done 且还在同一期 → 保持原样,只是金额跟着显示。
+      // ⚠️ 这一条不能和上面合并:done 是「你真金白银买了」,
+      //    同一期内因为重算就退回 open 的话,你会以为刚才那下没生效,
+      //    再勾一次就多出一条假的现金流。
       t.target = x.amount;
     }
 

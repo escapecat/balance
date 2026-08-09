@@ -56,6 +56,30 @@
   --danger-dim:#fdeceb;
   --on-accent: #ffffff;      /* 主色上的文字 —— 深色模式要跟着翻 */
 
+  /* 首屏主视觉 —— **自己一套变量,不能借 --accent**。
+     深色模式下 --accent 会翻成浅蓝,借用的话夜里首屏是一块亮蓝底压白字。 */
+  --hero-a:  #16334f;
+  --hero-b:  #2d5f8f;
+  --hero-fg: #ffffff;
+  --hero-dim: rgba(255,255,255,.62);
+  --hero-line: rgba(255,255,255,.16);
+
+  /* 类别色 —— 语义由 data/palette.js 指派,这里只管长什么样。
+     ⚠️ 饱和度压在中档:钱的界面上,高饱和的一排色块看着像玩具。
+        彼此拉开的是**色相和明度**,不是艳度。 */
+  --cat-a: #3059c2;  --cat-a-soft: #e8edfa;   /* 标普500  靛 */
+  --cat-b: #0d8593;  --cat-b-soft: #e0f2f4;   /* 纳指100  青 */
+  --cat-c: #bf8618;  --cat-c-soft: #fbf0dc;   /* 黄金     金 */
+  --cat-d: #9c4478;  --cat-d-soft: #f7e9f1;   /* 红利低波 玫 */
+  --cat-e: #2c8657;  --cat-e-soft: #e2f2e9;   /* 中长债   绿 */
+  --cat-f: #679b45;  --cat-f-soft: #ecf4e4;   /* 中短债   浅绿 */
+  --cat-g: #7c8390;  --cat-g-soft: #eef0f3;   /* 现金     灰 */
+  --cat-h: #8a6b4f;  --cat-h-soft: #f2ece6;   /* 未分类   棕 */
+  --cat-i: #5a6b8a;  --cat-i-soft: #eaedf3;   /* 组合外   蓝灰 */
+  /* 压在类别色块上的文字。⚠️ 不能写死白色 —— 深色模式下类别色整套提亮，
+     白字压上去对比度掉到读不出来，得反过来用深色。 */
+  --on-cat: #ffffff;
+
   /* 阴影两档:平时几乎看不见,浮起来的才明显 */
   --shadow:   0 1px 2px rgba(16,24,40,.04), 0 1px 3px rgba(16,24,40,.06);
   --shadow-2: 0 4px 6px -2px rgba(16,24,40,.03), 0 12px 16px -4px rgba(16,24,40,.08);
@@ -86,6 +110,27 @@
     --on-accent: #0d1a26;
     --shadow:    0 1px 2px rgba(0,0,0,.4);
     --shadow-2:  0 12px 24px rgba(0,0,0,.45);
+
+    /* 夜里首屏压暗一档 —— 白天那块蓝在暗环境里晃眼 */
+    --hero-a:  #16232f;
+    --hero-b:  #23445f;
+    --hero-fg: #eef1f5;
+    --hero-dim: rgba(255,255,255,.55);
+    --hero-line: rgba(255,255,255,.12);
+
+    /* ⚠️ 类别色**整套提亮**:白天那套压在 #1c1f25 上对比度不够,
+       尤其是 5px 高的进度条,细线在暗底上更吃亏。
+       soft 底色则反过来压暗 —— 白天的浅底在夜里会变成一块发光的板。 */
+    --cat-a: #7d9cf0;  --cat-a-soft: #1b2440;
+    --cat-b: #3fb9c7;  --cat-b-soft: #122e33;
+    --cat-c: #e0ad4f;  --cat-c-soft: #33280f;
+    --cat-d: #d081ad;  --cat-d-soft: #331d2a;
+    --cat-e: #5cbc86;  --cat-e-soft: #14301f;
+    --cat-f: #9ccb75;  --cat-f-soft: #1f2c15;
+    --cat-g: #99a1ad;  --cat-g-soft: #262a31;
+    --cat-h: #bf9a78;  --cat-h-soft: #2e2419;
+    --cat-i: #8e9dbb;  --cat-i-soft: #1e232e;
+    --on-cat: #16181d;
   }
 }
 
@@ -506,18 +551,53 @@ input:focus, select:focus {
   letter-spacing: -.01em;
 }
 
-/* ---- 首屏的总额:唯一的主视觉 ---- */
-.hero { padding: var(--s2) 0 var(--s5); }
-.hero-num {
-  font-size: 34px; font-weight: 680; line-height: 1.15;
-  letter-spacing: -.025em; margin: 0;
+/* ---- 首屏的总额:唯一的主视觉 ----
+   ⚠️ 早先这里只是「大一号的黑字」,于是首屏第一眼和记事本没区别 ——
+      「太朴素」的根源在此。一个每月才开一次的工具,打开那一瞬间
+      得先给出「这是我的钱」的分量感,再谈信息密度。
+   ⚠️ 但**只有这一块**允许有色底。两块以上就开始互相抢,
+      而这一页真正要读的是下面的清单。 */
+.hero {
+  position: relative; overflow: hidden;
+  margin: var(--s1) 0 var(--s5);
+  padding: var(--s5) var(--s4) var(--s4);
+  border-radius: var(--r-lg);
+  background: linear-gradient(142deg, var(--hero-a) 0%, var(--hero-b) 100%);
+  color: var(--hero-fg);
+  box-shadow: var(--shadow-2);
 }
+/* 右上角一团极轻的光 —— 纯色块会显得像个色卡,这一下才有材质。
+   pointer-events:none 是必须的,否则它盖在内容上,点不到下面的东西。 */
+.hero::after {
+  content: ''; position: absolute; pointer-events: none;
+  top: -70px; right: -50px; width: 220px; height: 220px; border-radius: 50%;
+  background: radial-gradient(circle, rgba(255,255,255,.13) 0%, rgba(255,255,255,0) 70%);
+}
+.hero-cap {
+  font-size: var(--t-xs); letter-spacing: .08em; font-weight: 500;
+  color: var(--hero-dim); margin-bottom: var(--s1);
+}
+.hero-num {
+  font-size: 36px; font-weight: 680; line-height: 1.1;
+  letter-spacing: -.028em; margin: 0;
+}
+/* 组合 / 组合外拆成两格 —— 挤在一行灰字里的时候,
+   「这两个数加起来才是上面那个」这层关系完全读不出来。 */
+.hero-split {
+  display: flex; gap: var(--s4); margin-top: var(--s4);
+  padding-top: var(--s3); border-top: 1px solid var(--hero-line);
+}
+.hero-split > div { min-width: 0; }
+.hero-split .k { display: block; font-size: var(--t-xs); color: var(--hero-dim); }
+.hero-split .v { display: block; font-size: var(--t-md); font-weight: 620;
+                 font-variant-numeric: tabular-nums; letter-spacing: -.015em;
+                 margin-top: 1px; }
 .hero-sub {
   display: flex; flex-wrap: wrap; align-items: center; gap: var(--s1) var(--s3);
-  margin-top: var(--s2); font-size: var(--t-sm); color: var(--text-dim);
+  margin-top: var(--s3); font-size: var(--t-sm); color: var(--hero-dim);
 }
-.hero-sub .k { color: var(--text-dim2); }
-.hero-sub .v { color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.hero .pill { background: rgba(255,255,255,.14); color: var(--hero-fg); }
+.hero .pill.warn { background: rgba(255,196,120,.2); color: #ffd9a3; }
 
 /* 日期状态用胶囊 —— 比一行灰字更容易被扫到,又不像红字那样喊 */
 .pill {
@@ -551,11 +631,24 @@ h2 .n { color: var(--text-dim2); font-weight: 500; margin-left: var(--s1);
         border-bottom: 1.5px solid var(--border-2);
         transform: rotate(-45deg); }
 
-/* ---- 进度条:更细,底色更淡 ---- */
-.bar { height: 5px; margin-top: 6px; background: var(--surface-3); }
-.bar i { transition: width .3s var(--ease); }
-/* 超配的用暖色,一眼分得出「缺」和「超」 */
+/* ---- 进度条:按类别上色 ----
+   ⚠️ 早先六个类别的条全是同一个 --accent。六条一模一样的蓝排在一起,
+      眼睛只好逐行读文字才知道谁是谁 —— 「一眼看出哪儿不对」这个目标直接落空。
+      颜色由 data/palette.js 按**类别名**指派,行内设 --c 传进来。 */
+.bar { height: 6px; margin-top: 7px; background: var(--surface-3); }
+.bar i { background: var(--c, var(--accent)); transition: width .35s var(--ease); }
+/* 超配的用暖色:同样是满格,一个是到位了一个是溢出了,
+   光看长度分不出来 —— 而这两件事要采取的行动正好相反。
+   ⚠️ 这里必须盖掉类别色,否则「超配」这个信号被色彩身份吃掉。 */
 .bar.over i { background: var(--warn); }
+
+/* 行首色点 —— 把条上的颜色和名字绑在一起。
+   没有它的话,色条只是装饰;有了它,颜色才开始承载「这是哪一类」。 */
+.dot {
+  flex: none; width: 8px; height: 8px; border-radius: 3px;
+  background: var(--c, var(--border-2));
+  display: inline-block; margin-right: 7px; vertical-align: 1px;
+}
 
 /* ---- 图表 ---- */
 .chart svg { border-radius: var(--r-sm); }

@@ -96,11 +96,35 @@ fi
 # 写注释:用中文量词(「涨了 6 万」)。
 # 真需要真数的测试从 %TEMP%/pf/expected.json 读(见 tools/mkbaseline.js)。
 # 确实要写千分位字面量(比如测千分位解析),在那一行加 `check:money-ok`。
+# ⚠️ CSS 的 rgba()/hsl() 要豁免:`rgba(255,255,255,.6)` 里的 `5,255`
+#    完全符合「数字-逗号-三位数字」,但它是颜色不是钱。
+#    不豁免的话每加一处半透明就得手动标一次 check:money-ok,
+#    标记一多就没人看了 —— 守卫的可信度是被误报磨掉的。
 if git ls-files | xargs grep -nE '[0-9],[0-9]{3}' 2>/dev/null \
-   | grep -v 'check:money-ok' | grep -q .; then
+   | grep -vE 'check:money-ok|rgba?\(|hsla?\(' | grep -q .; then
   echo "✗ 出现了带千分位的数字 —— 仓库是公开的,那可能是真实金额:"
-  git ls-files | xargs grep -nE '[0-9],[0-9]{3}' 2>/dev/null | grep -v 'check:money-ok'
+  git ls-files | xargs grep -nE '[0-9],[0-9]{3}' 2>/dev/null \
+    | grep -vE 'check:money-ok|rgba?\(|hsla?\('
   echo "   夹具写 1000000,注释写「6 万」;真要写千分位就在那行加 check:money-ok"
+  fail=1
+fi
+
+# ---- 守卫 6:颜色只能来自令牌 ----
+#
+# style.css 开头就写着「组件里出现字面 #rrggbb 就是 bug」,
+# 但那句话**只是注释,没有守卫** —— 于是 ui/stats.js 里长出了一个
+# 写死八个 hex 的 HUES 数组,而且按索引取色:同一个类别
+# 在饼图和柱图里是两个颜色,深色模式下那套低饱和色又几乎看不见。
+# 规范没有守卫撑着的话,它迟早只是一段自我感觉良好的注释。
+#
+# 颜色的唯一出处:style.css 的 :root(长什么样)+ data/palette.js(谁用哪个)。
+if git ls-files 'app/ui/*.js' 'app/core/*.js' \
+   | xargs grep -nE '#[0-9a-fA-F]{3,6}\b' 2>/dev/null \
+   | grep -v 'check:color-ok' | grep -q .; then
+  echo "✗ 组件里出现了字面颜色 —— 深色模式跟不上,而且会和别处不一致:"
+  git ls-files 'app/ui/*.js' 'app/core/*.js' \
+    | xargs grep -nE '#[0-9a-fA-F]{3,6}\b' 2>/dev/null | grep -v 'check:color-ok'
+  echo "   类别色用 Palette.color(类别);其它色在 style.css 的 :root 里加一个 --x"
   fail=1
 fi
 

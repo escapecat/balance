@@ -77,16 +77,24 @@ var NowUI = (function () {
     // ⚠️ 用 .hero 而不是 h1。别的页面的 h1 是「历史」「设置」这种路牌,
     //    而这里是一个**要被读的数**。同一个样式扛两种角色,哪边都不出彩。
     var hero = h('div', { class: 'hero' });
+    hero.appendChild(h('div', { class: 'hero-cap' }, ['总资产']));
     hero.appendChild(h('div', { class: 'hero-num' }, ['¥' + money(sm.total + ext)]));
-    var sub = h('div', { class: 'hero-sub' });
-    sub.appendChild(h('span', {}, [
-      h('span', { class: 'k' }, ['组合 ']), h('span', { class: 'v' }, [money(sm.total)]),
+    // ⚠️ 组合和组合外拆成两格,不再挤在一行灰字里 ——
+    //    「这两个加起来才是上面那个」这层关系,并排才读得出来。
+    //    组合外为 0 时整格不出现:一个写着 ¥0 的格子只会让人以为漏填了。
+    var split = h('div', { class: 'hero-split' });
+    split.appendChild(h('div', {}, [
+      h('span', { class: 'k' }, ['投资组合']),
+      h('span', { class: 'v' }, ['¥' + money(sm.total)]),
     ]));
     if (ext) {
-      sub.appendChild(h('span', {}, [
-        h('span', { class: 'k' }, ['组合外 ']), h('span', { class: 'v' }, [money(ext)]),
+      split.appendChild(h('div', {}, [
+        h('span', { class: 'k' }, ['组合外']),
+        h('span', { class: 'v' }, ['¥' + money(ext)]),
       ]));
     }
+    hero.appendChild(split);
+    var sub = h('div', { class: 'hero-sub' });
     sub.appendChild(h('span', { class: 'pill' + (stale ? ' warn' : '') }, [
       snap.date.slice(5).replace('-', '/') + (age > 0 ? ' · ' + age + ' 天前' : ' · 今天'),
     ]));
@@ -196,8 +204,11 @@ var NowUI = (function () {
       return db - da;
     }).forEach(function (r) {
       var row = h('div', { class: 'list-row' });
-      var b2 = h('div', { class: 'body' }, [
+      // 类别色从 data/palette.js 来,行内设成 --c,条和点共用同一个值。
+      // ⚠️ 不在这里写死颜色 —— 写死的话深色模式跟不上,而且饼图那边会各写一套。
+      var b2 = h('div', { class: 'body', style: '--c:' + Palette.color(r.category) }, [
         h('div', { class: 'ttl' }, [
+          h('i', { class: 'dot' }),
           r.category + (r.unknown ? '(未分类)' : ''),
         ]),
       ]);

@@ -109,8 +109,13 @@ var StatsUI = (function () {
   function md(d) { return d.slice(5).replace('-', '/'); }
 
   // 低饱和的一组 —— 钱的事不用高饱和,也不该是绿的(见 style.css 开头)
-  var HUES = ['#1d3f63', '#3d6b96', '#6b93b8', '#a25a09', '#c08a3e', '#8b7355',
-              '#9aa4b0', '#c4ccd6'];
+  // 类别色一律走 data/palette.js。
+  // ⚠️ 早先这里是一个写死的 HUES 数组，按**索引**取色，
+  //    而索引来自当次渲染的排序 —— 于是同一个类别
+  //    在饼图里是棕色、在柱图里是蓝色，图例反而帮倒忙。
+  //    还有一层：它吐的是字面 hex，深色模式下那套低饱和度色几乎看不见。
+  function hue(cat) { return Palette.color(cat); }
+  var LINE = 'var(--cat-a)';   // 总资产走势线 —— 不属于任何类别，固定一个色
 
   function render() {
     el.innerHTML = '';
@@ -161,7 +166,7 @@ var StatsUI = (function () {
     cats.forEach(function (c, i) {
       if (!(cur.pct[c] > 0)) return;
       lg.appendChild(h('span', { class: 'lg' }, [
-        h('i', { style: 'background:' + HUES[i % HUES.length] }),
+        h('i', { style: 'background:' + hue(c) }),
         h('span', {}, [c + ' ' + pct(cur.pct[c])]),
       ]));
     });
@@ -271,17 +276,17 @@ var StatsUI = (function () {
     svg.appendChild(s('polygon', {
       points: X(0) + ',' + (H - padY) + ' ' + area + ' ' +
               X(comp.length - 1) + ',' + (H - padY),
-      fill: HUES[0], opacity: '.10',
+      fill: LINE, opacity: '.12',
     }));
     svg.appendChild(s('polyline', {
-      points: area, fill: 'none', stroke: HUES[0], 'stroke-width': '2',
+      points: area, fill: 'none', stroke: LINE, 'stroke-width': '2.5',
       'stroke-linejoin': 'round', 'stroke-linecap': 'round',
     }));
     comp.forEach(function (c, i) {
       // 命中区比圆点大得多 —— 3.5px 的点在手机上根本点不中
       var hit = s('circle', { cx: X(i), cy: Y(c.total), r: '14', fill: 'transparent' });
       var dot = s('circle', { cx: X(i), cy: Y(c.total), r: '3.5',
-                              fill: 'var(--surface)', stroke: HUES[0], 'stroke-width': '2' });
+                              fill: 'var(--surface)', stroke: LINE, 'stroke-width': '2' });
       svg.appendChild(dot);
       svg.appendChild(bindTip(hit, ctx, [
         [c.date], ['总资产', '¥' + money(c.total)],
@@ -313,7 +318,7 @@ var StatsUI = (function () {
       if (p <= 0) return;
       var arc = s('circle', {
         cx: cx, cy: cy, r: R, fill: 'none',
-        stroke: HUES[i % HUES.length], 'stroke-width': '20',
+        stroke: hue(c), 'stroke-width': '20',
         'stroke-dasharray': (p * C) + ' ' + C,
         'stroke-dashoffset': -off * C,
         transform: 'rotate(-90 ' + cx + ' ' + cy + ')',
@@ -357,7 +362,7 @@ var StatsUI = (function () {
         if (p <= 0) return;
         var hgt = p * H;
         var rect = s('rect', { x: x, y: y, width: bw, height: hgt,
-                               fill: HUES[j % HUES.length] });
+                               fill: hue(cat) });
         svg.appendChild(bindTip(rect, ctx, [
           [cat], [c.date, pct(p)], ['金额', '¥' + money(c.by[cat])],
         ]));
@@ -365,7 +370,7 @@ var StatsUI = (function () {
         if (hgt >= 16 && bw >= 26) {
           svg.appendChild(s('text', {
             x: x + bw / 2, y: y + hgt / 2 + 3, 'text-anchor': 'middle',
-            'font-size': '9', fill: '#fff', opacity: '.9',
+            'font-size': '9', fill: 'var(--on-cat)', opacity: '.92',
           }, [txt(pct(p, 0))]));
         }
         y += hgt;

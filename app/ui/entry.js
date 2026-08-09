@@ -348,8 +348,53 @@ var EntryUI = (function () {
 
     go.then(function (yes) {
       if (!yes) return;
+      return lateActions(built.snapshot);
+    }).then(function (ok) {
+      if (ok === undefined || ok === false) return;
       Ledger.commit(built.snapshot);
       if (onDone) onDone(true);
+    });
+  }
+
+  /** ⚠️ **动作日期晚于快照日期 = 那笔买卖会被算成花费。**
+   *
+   *  区间是 `(上一期, 这一期]`。你今天买了 1 万记下来,而这一期的日期
+   *  写成昨天 —— 那笔买入掉到区间外,可是现金的减少已经录进快照了。
+   *  结果:「钱少了但没买东西」算成花费 −10000,
+   *        「持仓多了但没买」算成市场涨 +10000。
+   *  两个错**方向相反、配对出现,总额完全对得上** —— 查不出来。
+   *
+   *  草稿最容易造成这个:`loadDraft()` 只在 date 为空时才补今天,
+   *  所以昨天填了一半、今天保存,日期还停在昨天。
+   *
+   *  @param snap 会被**就地改掉** date —— 调用方紧接着就 commit 它
+   *  @return Promise<true 继续 | false 别存>
+   */
+  function lateActions(snap) {
+    var date = snap.date;
+    var prev = Ledger.latest(snapshots());
+    var late = Actions.between(prev ? prev.date : null, null).filter(function (f) {
+      return f.date > date;
+    });
+    if (!late.length) return Promise.resolve(true);
+    var sum = late.reduce(function (n, f) {
+      return n + (f.kind === 'sell' ? -1 : 1) * f.amount;
+    }, 0);
+    return Modal.pick({
+      title: '有 ' + late.length + ' 笔买卖比这一期还晚',
+      hint: '这一期记的是 ' + date + ',而 ' + late[0].date +
+            ' 那几笔(净 ¥' + money(sum) + ')在它之后。' +
+            '照这样存下去,那几笔会被算成「花费」,同时凭空多出一笔「市场涨跌」—— ' +
+            '两个数一正一负,总额还是对的,所以事后看不出来。',
+      options: [
+        { key: 'fix', label: '把这一期改成 ' + late[late.length - 1].date,
+          hint: '推荐 —— 快照里的余额本来就是那天之后的' },
+        { key: 'keep', label: '就用 ' + date, hint: '我确定那几笔发生在这期之后' },
+      ],
+    }).then(function (v) {
+      if (!v) return false;
+      if (v === 'fix') { snap.date = late[late.length - 1].date; }
+      return true;
     });
   }
 
@@ -358,7 +403,11 @@ var EntryUI = (function () {
     onDone = (opts || {}).onDone;
     draft = Ledger.loadDraft() || { date: today(), holdings: {}, cash: {},
                                     external: {}, netInflow: '', declared: '' };
-    if (!draft.date) draft.date = today();
+    // ⚠️ 草稿的日期**过期了就换成今天**,不是只在为空时才补。
+    //    昨天填了一半、今天接着填,日期停在昨天的话,今天记的买卖
+    //    就会掉到区间外被算成花费(见 lateActions)。
+    //    未来的日期不动 —— 那是你自己填的,可能有意为之。
+    if (!draft.date || draft.date < today()) draft.date = today();
     render();
   }
 

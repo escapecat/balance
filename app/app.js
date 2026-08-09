@@ -62,10 +62,11 @@
    *  ⚠️ 每个页面进去都该从头看起。没有哪一次切 tab 是想接着上一页的位置读的。
    */
   function toTop() {
+    // ⚠️ 滚的是 **.page**，不是 window。改成 app shell 结构之后
+    //    页面本身 overflow:hidden 根本不滚，滚 window 等于什么都没做。
     try {
-      if (typeof window !== 'undefined' && window.scrollTo) window.scrollTo(0, 0);
-      if (document.documentElement) document.documentElement.scrollTop = 0;
-      if (document.body) document.body.scrollTop = 0;
+      var p = document.querySelector && document.querySelector('.page');
+      if (p) p.scrollTop = 0;
     } catch (e) {}
   }
 
@@ -76,7 +77,12 @@
     //    「尽力而为地跑」的后果是数据被新代码按错误的假设改写一遍,
     //    而那时候连回滚点都被覆盖了。宁可这一屏什么都干不了。
     if (booted && !booted.ok) {
+      // ⚠️ 这一屏也要放进 .page —— 它是 flex 里那个会滚的容器。
+      //    直接把 .wrap 挂到 #app 上的话，文字长一点就翻不下去，
+      //    而这一屏偏偏是出问题时唯一能看的东西。
+      var stopPage = h('div', { class: 'page' });
       var stop = h('div', { class: 'wrap' });
+      stopPage.appendChild(stop);
       stop.appendChild(h('h1', {}, ['先别动']));
       stop.appendChild(h('div', { class: 'note danger' }, [booted.why]));
       stop.appendChild(h('div', { class: 'hint', style: 'margin-top:12px' }, [
@@ -86,11 +92,14 @@
         class: 'btn', style: 'margin-top:16px',
         onclick: function () { SettingsUI.exportFile(); },
       }, ['导出备份(只读)']));
-      root.appendChild(stop);
+      root.appendChild(stopPage);
       return;
     }
 
-    var page = h('div');
+    // ⚠️ **必须带 .page** —— 它是 flex 布局里那个「吃掉剩余空间并自己滚」
+    //    的容器。少这个 class，内容区就不再滚，整页也不滚（html 是
+    //    overflow:hidden），表现是长页面根本翻不下去。
+    var page = h('div', { class: 'page' });
 
     // 录入是全屏接管 —— 抄数字的时候底下不该还挂着 tab 栏勾着你的注意力
     if (entering) {

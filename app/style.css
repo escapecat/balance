@@ -38,6 +38,15 @@
      改版前 .chips 只有 33px 高,手机上一按一个不准。 */
   --tap: 44px;
 
+  /* ⚠️ **tab 栏的高度必须只有一个出处。**
+     它同时被三个地方用到:body 给内容让出的下边距、.wrap 撑满时要减掉的量、
+     以及 tab 栏自己。早先 body 和 .wrap 里硬编码的是 64px,
+     而真实高度是按钮 52 + 上边框 1 = 53px —— 差的那 11px 就变成
+     内容区底边和 tab 栏顶边之间一条露出页面底色的缝,
+     在深色模式的手机上看着就是「tab 栏上面还空了一条」。
+     数字对不上是因为 64 从一开始就是拍脑袋估的,从没和真实高度核对过。 */
+  --tabbar-h: 53px;
+
   /* ⚠️ 页面底色**故意贴近卡片底色**。
      两者差得明显的话,内容不满一屏时卡片结束的地方会出现一道色差,
      看起来就是「页面到此为止,下面空了一块」—— 而这在高屏幕的手机上
@@ -160,7 +169,7 @@ body {
      左右两边是横屏时的刘海。 */
   padding: env(safe-area-inset-top)
            env(safe-area-inset-right)
-           calc(64px + env(safe-area-inset-bottom))
+           calc(var(--tabbar-h) + env(safe-area-inset-bottom))
            env(safe-area-inset-left);
   background: var(--bg);
   color: var(--text);
@@ -174,14 +183,14 @@ body {
    那道色差看起来就是「页面到此为止，下面空了一块」——
    而内容长的页面(比如设置)整屏都是卡片色，所以显得完整。
    同一个 app 里两种观感，差别只来自内容多少，那不该由用户承担。
-   高度减掉 body 已经付过的那几笔(tab 栏 64px + 上下安全区)，否则重复扣减。 */
+   高度减掉 body 已经付过的那几笔(tab 栏 --tabbar-h + 上下安全区)，否则重复扣减。 */
 .wrap {
   max-width: 560px; margin: 0 auto; padding: var(--s4);
-  min-height: calc(100svh - 64px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  min-height: calc(100svh - var(--tabbar-h) - env(safe-area-inset-top) - env(safe-area-inset-bottom));
   display: flex; flex-direction: column;
 }
 @supports not (height: 100svh) {
-  .wrap { min-height: calc(100vh - 64px); }
+  .wrap { min-height: calc(100vh - var(--tabbar-h)); }
 }
 /* 只拉伸**最后一块内容容器**（app.js 渲染完盖上这个 class）——
    中间的拉伸会把行距扯开，而拉伸按钮会拉出一个巨高的按钮。
@@ -418,6 +427,10 @@ input:focus, select:focus {
   display: flex; background: var(--surface);
   border-top: 1px solid var(--border);
   padding-bottom: env(safe-area-inset-bottom);
+  /* ⚠️ 高度**锁死成变量**，不再由按钮的 min-height 间接决定 ——
+     那样改一下按钮内边距，body 让出的空间就和它对不上了。 */
+  min-height: var(--tabbar-h);
+  box-sizing: content-box;
   /* ⚠️ **向下溢出一块实心色，盖住底部安全区。**
      `padding-bottom: env(safe-area-inset-bottom)` 理论上够了 ——
      但它依赖 env() 在这台设备、这个显示模式下真的算出非零值，
@@ -444,7 +457,7 @@ input:focus, select:focus {
   .tabbar { backdrop-filter: saturate(180%) blur(12px); }
 }
 .tabbar button {
-  flex: 1; min-height: 52px; padding: var(--s2) var(--s1);
+  flex: 1; min-height: calc(var(--tabbar-h) - 1px); padding: var(--s2) var(--s1);
   background: none; border: 0;
   color: var(--text-dim); font: inherit; font-size: 11px; cursor: pointer;
   transition: color .15s var(--ease);
@@ -744,7 +757,7 @@ h2 .n { color: var(--text-dim2); font-weight: 500; margin-left: var(--s1);
    ⚠️ **不用 :has()** —— 我没法在你的真机上验证它，而猜浏览器支持什么
       是错的做法。改成由 JS 显式加 .wrap-fill 这个 class：
       哪个页面是空状态，渲染它的代码最清楚，不需要 CSS 去反推。
-   ⚠️ 高度要减掉 body 已经付过的那几笔(tab 栏 64px + 上下安全区)，
+   ⚠️ 高度要减掉 body 已经付过的那几笔(tab 栏 --tabbar-h + 上下安全区)，
       否则会重复扣减，内容区反而比可视区还矮，底下照样空一截。 */
 /* .wrap 现在本来就撑满 + flex 竖排，这里只管空状态那一块居中 */
 .wrap-fill > .empty {

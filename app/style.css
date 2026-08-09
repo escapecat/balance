@@ -487,9 +487,17 @@ input:focus, select:focus {
    ⚠️ flex:none —— 内容再长也不许压缩它。 */
 .tabbar {
   flex: none;
-  display: flex; background: var(--surface);
+  display: flex;
   border-top: 1px solid var(--border);
   padding-bottom: env(safe-area-inset-bottom);
+  /* ⚠️ **底色必须和页面不同**，这是「大下巴」的真正解法。
+     底下那块 env(safe-area-inset-bottom) 是 home 条 / 手势条的避让区，
+     必须留 —— 不留按钮就被系统手势吃掉。原生 app 也留同样一块。
+     区别只在于：原生 tab bar 有自己的底色，所以那块看着是**栏的一部分**；
+     我们原来 --surface 和 --bg 是同一个值，它就看着是「页面下面空了一块」。
+     上色之后 52px 按钮 + 34px 安全区 = 一条 86px 的栏，
+     和 iOS 原生的 49+34 几乎一样，不再是无主的空白。 */
+  background: var(--surface-2);
 }
 /* ⚠️ 这里**不再做毛玻璃**。栏改成 flex 成员之后，内容不会滑到它后面，
    半透明只会透出容器底色 —— 内容长短不同时透出的东西还不一样。 */

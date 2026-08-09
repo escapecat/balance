@@ -41,10 +41,32 @@
     TABS.forEach(function (t) {
       nav.appendChild(h('button', {
         'aria-current': current === t.id ? 'page' : null,
-        onclick: function () { current = t.id; entering = false; render(); },
+        onclick: function () {
+          current = t.id; entering = false;
+          render();
+          toTop();
+        },
       }, [h('span', { class: 'ic' }, [t.icon]), h('span', {}, [t.label])]));
     });
     return nav;
+  }
+
+  /** 切页之后回到顶部。
+   *
+   *  ⚠️ **这才是「点 tab 上下跳」的真正原因。**
+   *     浏览器会保留滚动位置:你在设置页滚到基金列表中间,切到历史页,
+   *     那个位置还留着 —— 而历史页没那么长,浏览器一夹紧滚动范围,
+   *     整页就跳一下。内容越短跳得越明显,所以「空白」看着像元凶,
+   *     其实它只是让这一下变得显眼。
+   *
+   *  ⚠️ 每个页面进去都该从头看起。没有哪一次切 tab 是想接着上一页的位置读的。
+   */
+  function toTop() {
+    try {
+      if (typeof window !== 'undefined' && window.scrollTo) window.scrollTo(0, 0);
+      if (document.documentElement) document.documentElement.scrollTop = 0;
+      if (document.body) document.body.scrollTop = 0;
+    } catch (e) {}
   }
 
   function render() {
@@ -119,13 +141,17 @@
   function fillRest(page) {
     var wrap = page.querySelector && page.querySelector('.wrap');
     if (!wrap || (wrap.className || '').indexOf('wrap-fill') >= 0) return;
+    // ⚠️ **只拉伸真正排在最后的那一块。**
+    //    早先是从后往前找第一个列表就拉 —— 而主界面「上一期」那个列表
+    //    后面还有三个按钮,拉伸它等于把按钮推到屏幕最底下,
+    //    中间空出一大块,比原来那道色差还难看。
+    //    后面还有东西的话就不该拉它,那种页面靠底色接近来兜底(见 style.css)。
     var kids = wrap.children || [];
-    for (var i = kids.length - 1; i >= 0; i--) {
-      var c = (kids[i].className || '');
-      if (c.indexOf('list') >= 0 || c.indexOf('card') >= 0 || c.indexOf('chart') >= 0) {
-        kids[i].className = c + ' fill-rest';
-        return;
-      }
+    var last = kids[kids.length - 1];
+    if (!last) return;
+    var c = (last.className || '');
+    if (c.indexOf('list') >= 0 || c.indexOf('card') >= 0 || c.indexOf('chart') >= 0) {
+      last.className = c + ' fill-rest';
     }
   }
 

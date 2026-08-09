@@ -281,8 +281,14 @@ var NowUI = (function () {
     ]);
   }
 
+  var lastView = null;   // 换了一屏才回顶部，重渲染不动
+
   function render() {
     el.innerHTML = '';
+    // 换了一屏就回到顶部。⚠️ 只在**视图真的变了**时做 ——
+    // 每次 render 都做的话，勾一条待办都会把你弹回顶部。
+    var vNow = String(view);
+    if (vNow !== lastView) { lastView = vNow; Dom.toTop(); }
     var w = h('div', { class: 'wrap' });
     var st = Store.get('settings', {}) || {};
     var snaps = Store.get('snapshots', []) || [];

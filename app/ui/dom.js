@@ -55,7 +55,27 @@ var Dom = (function () {
     return (m && m[value]) || value || '';
   }
 
-  return { text: text, label: label, LABEL: LABEL };
+  /** 回到顶部 —— **换了一屏就该从头看起。**
+   *
+   *  ⚠️ 浏览器会保留滚动位置。从一个长页面切到短页面时,那个位置还留着,
+   *     浏览器一夹紧滚动范围,整页就跳一下 —— 表现是「点来点去上下跳」。
+   *     内容越短跳得越明显,所以底部那片空白看着像元凶,
+   *     其实它只是让这一下变得显眼。
+   *
+   *  ⚠️ 只在**视图真的变了**的时候调。每次 render 都调的话,
+   *     勾一条待办、改一个数字都会把你弹回顶部 —— 那更烦。
+   */
+  function toTop() {
+    try {
+      if (typeof window !== 'undefined' && window.scrollTo) window.scrollTo(0, 0);
+      if (typeof document !== 'undefined') {
+        if (document.documentElement) document.documentElement.scrollTop = 0;
+        if (document.body) document.body.scrollTop = 0;
+      }
+    } catch (e) {}
+  }
+
+  return { text: text, label: label, LABEL: LABEL, toTop: toTop };
 })();
 
 if (typeof module !== 'undefined') module.exports = Dom;

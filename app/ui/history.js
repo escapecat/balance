@@ -70,8 +70,14 @@ var HistoryUI = (function () {
     }, ['还有 ' + (rows.length - SHOW) + ' 条,全部展开']));
   }
 
+  var lastView = null;   // 换了一屏才回顶部，重渲染不动
+
   function render() {
     el.innerHTML = '';
+    // 换了一屏就回到顶部。⚠️ 只在**视图真的变了**时做 ——
+    // 每次 render 都做的话，勾一条待办都会把你弹回顶部。
+    var vNow = String(viewing ? viewing.snap.date : '');
+    if (vNow !== lastView) { lastView = vNow; Dom.toTop(); }
     // 看某一期的详情时**整屏接管** —— 和录入页、基金表单同一个模式
     if (viewing) { el.appendChild(snapshotView()); return; }
     var w = h('div', { class: 'wrap' });

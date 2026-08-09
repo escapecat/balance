@@ -38,7 +38,12 @@
      改版前 .chips 只有 33px 高,手机上一按一个不准。 */
   --tap: 44px;
 
-  --bg:        #f5f6f8;
+  /* ⚠️ 页面底色**故意贴近卡片底色**。
+     两者差得明显的话,内容不满一屏时卡片结束的地方会出现一道色差,
+     看起来就是「页面到此为止,下面空了一块」—— 而这在高屏幕的手机上
+     被放大得很厉害(19.5:9,几行内容只占三分之一)。
+     层次靠 border 和阴影给,不靠底色对比给。 */
+  --bg:        #fafbfc;
   --surface:   #ffffff;
   --surface-2: #eef0f4;
   --surface-3: #e4e7ec;
@@ -98,7 +103,7 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg:        #131519;
+    --bg:        #191c22;
     --surface:   #1c1f25;
     --surface-2: #262a31;
     --surface-3: #31363f;

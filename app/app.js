@@ -41,16 +41,6 @@
     return nav;
   }
 
-  function placeholder(title, body) {
-    var w = h('div', { class: 'wrap' });
-    w.appendChild(h('h1', {}, [title]));
-    w.appendChild(h('div', { class: 'empty' }, [
-      h('div', { class: 'big' }, ['🚧']),
-      h('div', { class: 'hint', style: 'margin-top:8px' }, [body]),
-    ]));
-    return w;
-  }
-
   function render() {
     root.innerHTML = '';
     var page = h('div');
@@ -69,7 +59,7 @@
     } else if (current === 'history') {
       HistoryUI.mount(page, { onChanged: function () {} });
     } else if (current === 'stats') {
-      page.appendChild(placeholder('统计', '收益率和结构变化 —— 还没做'));
+      StatsUI.mount(page);
     } else {
       NowUI.mount(page, { onEntry: function () { entering = true; render(); } });
     }

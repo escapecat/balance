@@ -51,6 +51,9 @@ var sandbox = {
   document: {
     body: body, documentElement: new El('html'), activeElement: null,
     createElement: function (t) { return new El(t); },
+    // SVG 走的是带命名空间的创建方式 —— 假 DOM 里少了它,
+    // 图表那一段会直接抛异常而不是「画不出来」,反而更容易发现
+    createElementNS: function (ns, t) { return new El(t); },
     createTextNode: function (t) { var n = new El('#text'); n.text = t; return n; },
     createDocumentFragment: function () { return new El('#frag'); },
     getElementById: function (id) { return id === 'app' ? appDiv : null; },
@@ -88,7 +91,8 @@ fs.readFileSync(path.join(APP, 'index.html'), 'utf8')
   });
 
 var page = process.argv[2] || 'now';
-var MOUNT = { now: 'NowUI', entry: 'EntryUI', me: 'SettingsUI', history: 'HistoryUI' };
+var MOUNT = { now: 'NowUI', entry: 'EntryUI', me: 'SettingsUI',
+              history: 'HistoryUI', stats: 'StatsUI' };
 var mod = MOUNT[page];
 if (!mod) { console.log('页面只有:' + Object.keys(MOUNT).join(' / ')); process.exit(1); }
 

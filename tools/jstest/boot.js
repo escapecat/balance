@@ -56,6 +56,7 @@ var sandbox = {
   document: {
     body: body, documentElement: new El('html'), activeElement: null,
     createElement: function (t) { return new El(t); },
+    createElementNS: function (ns, t) { return new El(t); },   // SVG 走这条
     createTextNode: function (t) { var n = new El('#text'); n.text = t; return n; },
     createDocumentFragment: function () { return new El('#frag'); },
     getElementById: function (id) { return id === 'app' ? appDiv : null; },
@@ -76,16 +77,8 @@ var sandbox = {
   location: { reload: function () {} },
 };
 sandbox.window = sandbox; sandbox.globalThis = sandbox;
-mem[NS + 'profile'] = JSON.stringify({ sex: 'male', age: 30, heightCm: 175,
-                                       activity: 'light', goal: 'cut', breakfast: 'light' });
-mem[NS + 'weightLog'] = JSON.stringify([{ date: '2026-01-01T00:00:00.000Z', kg: 70 }]);
-mem[NS + 'config'] = JSON.stringify({ equipment: ['炒锅', '空气炸锅', '电饭煲'], maxSpicy: 1,
-                                      maxActiveMinutes: 45, maxDifficulty: 3, maxIdleWait: 60,
-                                      allowOvernight: false, blacklist: [] });
-mem[NS + 'staples'] = JSON.stringify(['salt', 'cooking_oil', 'light_soy_sauce', 'rice']
-                                     .map(function (id) { return { id: id }; }));
-mem[NS + 'staplesMigrated'] = 'true';
-mem[NS + 'staplesConfirmed'] = 'true';
+// ⚠️ 这里**故意什么都不塞** —— 第一段测的就是「一条数据都没有」的状态,
+//    那是你第一次打开时看到的东西,也是最容易白屏的一条路。
 
 var ctx = vm.createContext(sandbox);
 fs.readFileSync(path.join(APP, 'index.html'), 'utf8')
@@ -123,7 +116,9 @@ Object.keys(real.data).forEach(function (k) {
   mem[NS + k] = JSON.stringify(real.data[k]);
 });
 
-['NowUI', 'SettingsUI', 'EntryUI'].forEach(function (name) {
+// ⚠️ **每加一页就要加进这个数组。** 漏了的话那一页挂了没人知道 ——
+//    而白屏在控制台之外没有任何提示,你得点到那个 tab 才发现。
+['NowUI', 'SettingsUI', 'EntryUI', 'HistoryUI', 'StatsUI'].forEach(function (name) {
   var node = new El('div');
   try {
     ctx[name].mount(node, { onEntry: function () {}, onDone: function () {},

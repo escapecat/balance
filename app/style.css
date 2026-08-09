@@ -469,3 +469,16 @@ input:focus, select:focus {
          border-radius: var(--r-full); }
 .bar u { position: absolute; top: -2px; bottom: -2px; width: 2px;
          background: var(--text-dim); text-decoration: none; }
+
+/* 图表 —— SVG 手写,零依赖。
+   ⚠️ 高度不写死:手机横竖屏切换、字体缩放都会变,
+      写死的话小屏上会被裁掉一截,而裁掉的通常正是最上面那层(现金)。 */
+.chart { margin-top: var(--s3); color: var(--text-dim); }
+.chart svg { display: block; border-radius: var(--r-sm); overflow: hidden; }
+
+/* 图例 —— 跟着图走,别单开一列。
+   单开一列的话在窄屏上会挤成一条竖线,读起来比不放还费劲 */
+.legend { display: flex; flex-wrap: wrap; gap: var(--s2) var(--s3);
+          margin-top: var(--s2); font-size: var(--t-xs); color: var(--text-dim); }
+.legend .lg { display: inline-flex; align-items: center; gap: 5px; }
+.legend .lg i { width: 9px; height: 9px; border-radius: 2px; flex: none; }

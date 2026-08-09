@@ -46,6 +46,29 @@ var HistoryUI = (function () {
            '-' + ('0' + d.getDate()).slice(-2);
   }
 
+  var SHOW = 8;          // 列表默认显示几条
+  var expanded = {};     // 哪几段被展开了
+
+  /** 长列表折叠 —— **记录只会越来越多。**
+   *  一年 12 期、三年 36 期、动作上百条,全铺出来就没法翻了。
+   *  ⚠️ 折叠了要**说出来还有多少条**,并且一点就能展开 ——
+   *     悄悄少显示几条,你会以为那几个月不存在。 */
+  function collapsible(key, rows, w) {
+    if (rows.length <= SHOW || expanded[key]) {
+      rows.forEach(function (r) { w.appendChild(r); });
+      if (rows.length > SHOW) {
+        w.appendChild(h('button', {
+          class: 'link', onclick: function () { expanded[key] = false; render(); },
+        }, ['收起']));
+      }
+      return;
+    }
+    rows.slice(0, SHOW).forEach(function (r) { w.appendChild(r); });
+    w.appendChild(h('button', {
+      class: 'link', onclick: function () { expanded[key] = true; render(); },
+    }, ['还有 ' + (rows.length - SHOW) + ' 条,全部展开']));
+  }
+
   function render() {
     el.innerHTML = '';
     var w = h('div', { class: 'wrap' });
@@ -76,12 +99,13 @@ var HistoryUI = (function () {
       ]));
     } else {
       var fl = h('div', { class: 'list' });
+      var actRows = [];
       acted.forEach(function (f) {
         var t = todos.filter(function (x) { return x.id === f.todoId; })[0];
         var bits = [md(f.date)];
         if (t && t.status === 'partial') bits.push('计划 ¥' + money(t.target) + ',只做了一部分');
         else if (t) bits.push('计划 ¥' + money(t.target));
-        fl.appendChild(h('div', { class: 'list-row' }, [
+        actRows.push(h('div', { class: 'list-row' }, [
           h('div', { class: 'body' }, [
             h('div', { class: 'ttl' }, [(f.kind === 'sell' ? '卖 ' : '买 ') + f.category]),
             h('div', { class: 'sub2' }, [bits.join(' · ')]),
@@ -91,6 +115,7 @@ var HistoryUI = (function () {
           ]),
         ]));
       });
+      collapsible('acted', actRows, fl);
       w.appendChild(fl);
     }
 
@@ -120,7 +145,12 @@ var HistoryUI = (function () {
 
     // ---- 每一期的总额变化 ----
     w.appendChild(h('h2', {}, ['每期总额']));
+    w.appendChild(h('div', { class: 'hint', style: 'margin-bottom:8px' }, [
+      '大数是**总资产**;右下角的涨跌只算**组合** —— ' +
+      '组合外那部分(MSFT、房产)是估值,一改就会让「市场赚了多少」凭空跳一下。',
+    ]));
     var sl = h('div', { class: 'list' });
+    var snapRows = [];
     snaps.slice().reverse().forEach(function (s, i, arr) {
       var prev = arr[i + 1];
       var d = Ledger.delta(s, prev);
@@ -132,23 +162,30 @@ var HistoryUI = (function () {
           h('div', { class: 'sub2' }, [
             // ⚠️ 三种情况说三句不同的话:第一期 / 分得开 / 分不开。
             //    第三种最要紧 —— 不许拿总额当涨跌。
-            d.change == null ? '第一期'
+            (d.external ? '组合 ' + money(d.total) + ' · 组合外 ' + money(d.external) + ' · ' : '') +
+            (d.change == null ? '第一期'
               : d.market == null
-                ? signed(d.change) + ' · 那时候还没开始记买卖,分不出涨跌'
-                : '工资−花费 ' + signed(d.inflow) + '　涨跌 ' + signed(d.market),
+                ? signed(d.change) + ',分不出涨跌'
+                : '工资−花费 ' + signed(d.inflow) + ' · 涨跌 ' + signed(d.market)),
           ]),
         ]),
       ]);
       // ⚠️ 涨跌**不着色**。样式表开头就写着「钱的事不用高饱和,也不该是绿的」——
       //    而且涨红跌绿还是涨绿跌红,中西正好相反,一眼看去容易读反。
       //    `+` / `−` 本来就说清楚了。
+      // ⚠️ 主数字给**总资产**(组合 + 组合外),和首页顶上那个大数一致。
+      //    只给组合口径的话,两页对同一天显示两个不同的总额 ——
+      //    而你根本不知道差的那一块去哪了。
+      //    但**涨跌仍然只按组合算**:组合外那部分是拍脑袋估的估值,
+      //    一改就会让「市场让我赚了多少」凭空跳一下。
       row.appendChild(h('div', { class: 'amt' }, [
-        h('span', { class: 'u' }, ['¥']), money(d.total),
+        h('span', { class: 'u' }, ['¥']), money(d.total + (d.external || 0)),
         h('div', { class: 'sub2', style: 'font-weight:500' },
           [d.market != null ? signed(d.market) : d.change != null ? '涨跌未知' : '']),
       ]));
-      sl.appendChild(row);
+      snapRows.push(row);
     });
+    collapsible('snaps', snapRows, sl);
     w.appendChild(sl);
 
     // ---- 钱去哪了 ----

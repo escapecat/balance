@@ -29,6 +29,7 @@ var SettingsUI = (function () {
     if (n == null || isNaN(n)) return '—';
     return String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
   }
+  function pct(x) { return x == null ? '—' : (x * 100).toFixed(1).replace(/\.0$/, '') + '%'; }
   function st() { return Store.get('settings', {}) || {}; }
   function save(patch) { Config.save(patch); if (onChanged) onChanged(); render(); }
 
@@ -90,7 +91,18 @@ var SettingsUI = (function () {
     }
 
     // ---- 目标比例 ----
+    //
+    // ⚠️ **说清分母。** 百分比按「组合」算(持仓 + 现金),不含组合外资产 ——
+    //    首页顶上那个大数是「总资产」,两个数差着一个 MSFT,
+    //    不说的话你会拿 20% 去乘错的那个总额。
     w.appendChild(h('h2', {}, ['目标比例']));
+    if (sm) {
+      var extSum = Assets.total(snap).sum;
+      w.appendChild(h('div', { class: 'hint', style: 'margin-bottom:8px' }, [
+        '按**组合** ¥' + money(sm.total) + ' 算' +
+        (extSum ? '(不含组合外的 ¥' + money(extSum) + ' —— 那部分不参与再平衡)' : '') + '。',
+      ]));
+    }
     var tl = h('div', { class: 'list' });
     var sum = 0;
     Object.keys(s.targets || {}).forEach(function (c) {
@@ -211,13 +223,20 @@ var SettingsUI = (function () {
       numItem('偏差带', '偏差超过这么多个百分点,年度再平衡才动手',
               'band', Math.round((s.band || 0) * 1000) / 10, '%'),
     ]));
-    // 把「实际会留多少」算出来摆在这儿 —— 两个设置各是什么效果,
-    // 光看设置项是想不出来的,得看它们合起来的结果。
+    // ⚠️ 把两条设置**合起来的结果**算给人看,而且每个数都写清来源。
+    //    只摆两个百分比的话,「所以我到底能投多少」得自己在脑子里算 ——
+    //    而那正是你打开这一页想知道的唯一一件事。
     if (snap) {
-      var keep = Math.max(s.cashFloor || 0, (s.cashTarget || 0) * sm.total);
+      var byFloor = s.cashFloor || 0;
+      var byRatio = (s.cashTarget || 0) * sm.total;
+      var keep = Math.max(byFloor, byRatio);
+      var which = byRatio >= byFloor
+        ? '目标占比更严:' + pct(s.cashTarget) + ' × 组合 ' + money(sm.total)
+        : '保底更严:' + money(byFloor) + ' 这个绝对数';
       w.appendChild(h('div', { class: 'hint' }, [
-        '现在会留下 **¥' + money(keep) + '** 不投(两个里取更严的)' +
-        ',其余 ¥' + money(Math.max(0, sm.cash - keep)) + ' 才拿去买。',
+        '你现在有现金 **¥' + money(sm.cash) + '**。按上面两条要留下 ' +
+        '**¥' + money(keep) + '** 不投(' + which + '),' +
+        '剩下 **¥' + money(Math.max(0, sm.cash - keep)) + '** 拿去买基金。',
       ]));
     }
 

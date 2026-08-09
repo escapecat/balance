@@ -38,11 +38,15 @@
      改版前 .chips 只有 33px 高,手机上一按一个不准。 */
   --tap: 44px;
 
-  --bg:        #f5f6f8;
+  /* ⚠️ **页面底色 = 卡片底色。** 这是 flex 链条接不上时的兜底:
+     有些页面末尾是按钮或提示文字，拉伸它们会拉出一个巨高的按钮，
+     所以那种页面下面仍会露出容器背景 —— 同色就看不出来。
+     层次改由 border 和阴影提供，border 相应加深一档。 */
+  --bg:        #ffffff;
   --surface:   #ffffff;
   --surface-2: #eef0f4;
   --surface-3: #e4e7ec;
-  --border:    #e2e5ea;
+  --border:    #dcdfe6;
   --border-2:  #cfd4dc;
   --text:      #16181d;
   --text-dim:  #656c78;
@@ -98,11 +102,11 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg:        #131519;
+    --bg:        #1c1f25;
     --surface:   #1c1f25;
     --surface-2: #262a31;
     --surface-3: #31363f;
-    --border:    #2e333b;
+    --border:    #333942;
     --border-2:  #3d434d;
     --text:      #e9ebef;
     --text-dim:  #9aa1ac;
@@ -204,6 +208,32 @@ body {
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;  /* 滚到头不带动外层 */
+  /* 继续往下传:.page 撑满了，但里面的 .wrap 还是内容多高就多高，
+     底下会露出 .page 的背景。把这条链接通。 */
+  display: flex;
+  flex-direction: column;
+}
+
+/* ⚠️ **这条 flex 链条不涉及任何数值** —— 这正是它和今晚那些补丁的区别。
+     `flex: 1 0 auto` 而不是 `1`:内容比容器长时不许被压缩，
+     那种情况下该滚动，不该把内容挤扁。 */
+.wrap {
+  flex: 1 0 auto;
+  display: flex;
+  flex-direction: column;
+}
+/* 链条的最后一环:内容里最后一块容器吃掉剩下的空间。
+   由 app.js 渲染完盖上这个 class —— 好几页的末尾是按钮或提示文字，
+   拉伸它们会拉出一个巨高的按钮，所以要挑「真正排在最后的那块容器」。 */
+.fill-rest {
+  flex: 1 0 auto;
+  margin-bottom: calc(var(--s4) * -1);   /* 抵消 .wrap 的下内边距，真的贴到底 */
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.fill-rest > :last-child {
+  border-bottom-left-radius: 0 !important;
+  border-bottom-right-radius: 0 !important;
 }
 
 .wrap { max-width: 560px; margin: 0 auto; padding: var(--s4); }

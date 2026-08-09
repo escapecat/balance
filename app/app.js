@@ -128,21 +128,34 @@
     } else {
       NowUI.mount(page, { onEntry: function () { entering = true; render(); } });
     }
+    fillRest(page);
     root.appendChild(page);
     root.appendChild(tabbar());
   }
 
-  /* ⚠️ 这里**曾经有 fillRest / fitHeight**，用来把内容区撑到 tab 栏、
-   *  消除底部那片空白。撤掉了 —— 不是因为思路错，是因为每一版都引入了
-   *  新的毛病：撑高靠 CSS 单位猜 → 短页面多出可滚动空间（切 tab 上下跳）；
-   *  改成实测之后 → 最后一个元素不是列表的页面撑出一片空内边距，比不撑还空。
+  /** 让内容里最后一块容器吃掉剩余空间。
    *
-   *  十几轮一次没对，根本原因是**我看不到真机的渲染** ——
-   *  每一轮都在从描述反推，而每次反推都赌一个前提。
-   *  与其继续赌，不如回到一个已知状态：页面高度由内容决定。
+   *  ⚠️ 这一版和今晚那些失败的版本**关键区别是不算任何数值**:
+   *     .page(flex:1) → .wrap(flex:1) → 最后一块(flex:1)，
+   *     高度靠 flex 一层层传下来。之前那版要自己算
+   *     `min-height: calc(100svh - 53px - env(...))`，而那一串里
+   *     每一项都是假设 —— 错一项就是「短页面多出 34px 可滑动」。
    *
-   *  真要再做，先得在真机上量到「内容底边 / tab 栏顶边 / 屏幕底边」
-   *  三者的实际关系 —— 设置页那个「屏幕适配」就是为此留的。 */
+   *  ⚠️ 只标**真正排在最后**的那块容器。后面还有按钮的话拉它，
+   *     等于把按钮推到最底下，中间空一大块。
+   *  ⚠️ 空状态那一屏不标(它自己居中)。
+   */
+  function fillRest(page) {
+    var wrap = page.querySelector && page.querySelector('.wrap');
+    if (!wrap || (wrap.className || '').indexOf('wrap-fill') >= 0) return;
+    var kids = wrap.children || [];
+    var last = kids[kids.length - 1];
+    if (!last) return;
+    var c = (last.className || '');
+    if (c.indexOf('list') >= 0 || c.indexOf('card') >= 0 || c.indexOf('chart') >= 0) {
+      last.className = c + ' fill-rest';
+    }
+  }
 
 
 

@@ -22,7 +22,7 @@ var Todos = (function () {
   var OPEN = { open: 1, partial: 1 };        // 还欠着的两种状态
 
   function all() { return Store.get('todos', []) || []; }
-  function flows() { return Store.get('flows', []) || []; }
+  function flows() { return Actions.all(); }
 
   /** 稳定 key:动作 + 基金代码。**不含日期、不含金额。** */
   function keyOf(kind, code) { return kind + ':' + code; }
@@ -172,36 +172,13 @@ var Todos = (function () {
   }
 
   // ---------------- 现金流 ----------------
+  //
+  // ⚠️ 现金流的读写**全部委托给 core/actions.js** —— 这里只是转发。
+  //    两个地方都能往 flows[] 里写的话,迟早有一处忘了带某个字段,
+  //    而缺字段的那些记录会静默地不参与计算。
 
-  /** flow 的 id 只跟序号有关。**不用时间戳** —— 同一秒勾两条会撞,
-   *  而撞了之后其中一笔就静默消失了(按 id 去重的地方全中招)。 */
-  function newFlowId(list) {
-    var n = 1, used = {};
-    (list || []).forEach(function (f) { used[f.id] = 1; });
-    while (used['f' + n]) n++;
-    return 'f' + n;
-  }
-
-  function appendFlow(f) {
-    var list = flows().slice();
-    list.push(Object.assign({ id: newFlowId(list) }, f));
-    Store.set('flows', list);
-    return list;
-  }
-
-  /** 每一类累计投进去多少(买 − 卖)。历史页「钱去哪了」用这个。
-   *
-   *  ⚠️ 只统计**勾选申报过的**。2026-08 之前没有分类流水,
-   *     那几期只有总额 —— 界面上要明写「分类流向从这个月开始才有」,
-   *     不许拿总额倒推假数。 */
-  function netByCategory() {
-    var m = {};
-    flows().forEach(function (f) {
-      var sign = f.kind === 'sell' ? -1 : 1;
-      m[f.category] = (m[f.category] || 0) + sign * f.amount;
-    });
-    return m;
-  }
+  function appendFlow(f) { Actions.add(f); return Actions.all(); }
+  function netByCategory() { return Actions.netByCategory(); }
 
   return { all: all, flows: flows, keyOf: keyOf, sync: sync,
            complete: complete, drop: drop, revive: revive,

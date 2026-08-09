@@ -132,8 +132,8 @@ var HistoryUI = (function () {
             //    第三种最要紧 —— 不许拿总额当涨跌。
             d.change == null ? '第一期'
               : d.market == null
-                ? signed(d.change) + ' · 没记「本期净投入」,分不出涨跌'
-                : '净投入 ' + signed(d.inflow) + '　涨跌 ' + signed(d.market),
+                ? signed(d.change) + ' · 那时候还没开始记买卖,分不出涨跌'
+                : '工资−花费 ' + signed(d.inflow) + '　涨跌 ' + signed(d.market),
           ]),
         ]),
       ]);
@@ -194,15 +194,27 @@ var HistoryUI = (function () {
    *     录错了就删掉重录一遍,一次两分钟,换来的是历史永远可信。
    */
   function tapSnapshot(s, d) {
+    // ⚠️ 逐只基金的盈亏放在这儿,而不是首屏 ——
+    //    「这个月哪只赚了」是**回顾**时的问题,不是「今天该做什么」的问题。
+    //    塞进首屏的话,那一屏就从「该做什么」变成「看看行情」了。
+    var snaps = Store.get('snapshots', []) || [];
+    var i = snaps.findIndex(function (x) { return x.date === s.date; });
+    var prev = i > 0 ? snaps[i - 1] : null;
+    var pf = prev ? Ledger.perFund(s, prev) : null;
+
+    var opts = [];
+    if (pf) opts.push({ key: 'funds', label: '这一期各只赚了多少',
+                        hint: '市值变化减掉你买进去的钱' });
+    opts.push({ key: 'del', label: '删掉这一期', danger: true,
+                hint: '录错了就删掉重录 —— 这一页不提供「改」' });
+
     Modal.pick({
       title: s.date,
       hint: '组合 ¥' + money(d.total) +
             (d.market == null ? ' · 涨跌未知' : ' · 涨跌 ' + signed(d.market)),
-      options: [
-        { key: 'del', label: '删掉这一期', danger: true,
-          hint: '录错了就删掉重录 —— 这一页不提供「改」' },
-      ],
+      options: opts,
     }).then(function (v) {
+      if (v === 'funds') { showPerFund(s, pf); return; }
       if (v !== 'del') return;
       // ⚠️ 删掉一期会让**它之后那一期的涨跌重新算**(基准变了)。
       //    不说的话你会发现别的月份数字也变了,而完全想不到是这一下删的。
@@ -221,6 +233,35 @@ var HistoryUI = (function () {
         if (onChanged) onChanged();
         render();
       });
+    });
+  }
+
+  /** 这一期各只赚了多少 —— 涨跌和你买进去的钱**分开列**。
+   *
+   *  ⚠️ 只列涨跌的话,买得多的那只看起来总是「涨得最好」。
+   *     两栏并排才看得出「这只是真涨了,那只只是我买多了」。 */
+  function showPerFund(s, pf) {
+    var st = Store.get('settings', {}) || {};
+    var name = {};
+    (st.funds || []).forEach(function (f) { name[f.code] = f.name || f.code; });
+    var rows = pf.filter(function (r) {
+      return Math.abs(r.market) > 1 || Math.abs(r.netBuy) > 1;
+    }).sort(function (a, b) { return b.market - a.market; });
+
+    if (!rows.length) {
+      Modal.note({ title: s.date, body: '这一期各只都没什么变化。' });
+      return;
+    }
+    var lines = rows.map(function (r) {
+      return (name[r.code] || r.code) + '\n' +
+             '    涨跌 ' + signed(r.market) +
+             (Math.abs(r.netBuy) > 1 ? '    你买了 ' + signed(r.netBuy) : '') +
+             (r.dividend > 1 ? '    分红 ' + money(r.dividend) : '');
+    });
+    var sum = rows.reduce(function (a, r) { return a + r.market; }, 0);
+    Modal.note({
+      title: s.date + ' 各只盈亏',
+      body: lines.join('\n\n') + '\n\n合计涨跌 ' + signed(sum),
     });
   }
 

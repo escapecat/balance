@@ -37,6 +37,7 @@ global.Store = {
   remove: function (k) { delete mem[k]; },
 };
 global.Portfolio = require(path.join(A, 'core', 'portfolio.js'));
+global.Actions = require(path.join(A, 'core', 'actions.js'));
 global.Ledger = require(path.join(A, 'core', 'ledger.js'));
 var Allocate = require(path.join(A, 'core', 'allocate.js'));
 var Todos = require(path.join(A, 'core', 'todos.js'));

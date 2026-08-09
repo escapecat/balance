@@ -163,14 +163,16 @@ var EntryUI = (function () {
       w.appendChild(el2);
     }
 
-    // ⚠️ 净投入是这一页唯一的**新增输入**,也是「统计分析」的全部前提。
-    //    没有它,「总额涨了这么多」永远分不清是赚的还是又投的。
-    w.appendChild(h('div', { class: 'sec-h' }, ['本期净投入']));
-    w.appendChild(h('div', { class: 'list' }, [
-      numRow('转进去的 − 取出来的', '不填 = 这期没动过钱。取钱出来填负数',
-             draft, 'netInflow', null),
-    ]));
-
+    // ⚠️ 这里**没有「本期净投入」输入框**,而且不该有。
+    //
+    //    原来是有的:你得自己算「这个月转进去多少」填进来,填错了收益率就错。
+    //    现在它是**解出来的**:
+    //        现金变化 = 外部净流入 − 净买入 + 分红
+    //    净买入和分红来自你记的动作,现金变化是这一页抄的,
+    //    于是「工资 − 花费」自己就出来了。少一个框,少一处会填错的地方。
+    //
+    //    下面这块顺便把解出来的数当场显示 —— **抄完就能核对**,
+    //    离谱的话多半是漏记了一笔买卖,而不是你真的花了那么多。
     w.appendChild(summary(prev));
 
     w.appendChild(h('button', {
@@ -209,6 +211,43 @@ var EntryUI = (function () {
       } else {
         box.appendChild(h('div', { class: 'hint', style: 'margin-top:8px' }, ['和基金 app 对上了 ✓']));
       }
+    }
+
+    // ---- 解出来的两个数 ----
+    //
+    // ⚠️ **抄完就当场显示,不等到历史页去看。**
+    //    这两个数是这一页的产出,而它们同时也是最好的错误探测器:
+    //    「这个月花了二十万」几乎一定是漏记了一笔买入,不是你真的花了。
+    //    等你翻到历史页才看见的话,当时的记忆已经没了。
+    if (d.source === 'actions') {
+      var box2 = h('div', { style: 'margin-top:8px' });
+      box2.appendChild(h('div', { class: 'between' }, [
+        h('span', { class: 'xs dim' }, ['工资 − 花费']),
+        h('span', {}, [signed(d.inflow)]),
+      ]));
+      box2.appendChild(h('div', { class: 'between' }, [
+        h('span', { class: 'xs dim' }, ['市场涨跌']),
+        h('span', {}, [signed(d.market)]),
+      ]));
+      if (d.netBuy) {
+        box2.appendChild(h('div', { class: 'between' }, [
+          h('span', { class: 'xs dim' }, ['这期买卖(记了的)']),
+          h('span', { class: 'xs dim' }, [signed(d.netBuy)]),
+        ]));
+      }
+      box.appendChild(box2);
+      // 离谱值兜底。阈值取「一个月净流出超过组合的 5%」——
+      // 真发生这种事你自己知道;而更常见的原因是漏记了一笔买入。
+      if (d.inflow < 0 && Math.abs(d.inflow) > d.total * 0.05) {
+        box.appendChild(h('div', { class: 'note warn', style: 'margin-top:8px' }, [
+          '算出来这期净流出 ' + money(-d.inflow) + ' —— ' +
+          '**是不是有笔买入忘了记?** 漏记一笔的话,那笔钱会被算成你花掉了。',
+        ]));
+      }
+    } else if (d.change != null) {
+      box.appendChild(h('div', { class: 'hint', style: 'margin-top:8px' }, [
+        '这一期还分不出「涨跌」和「投入」—— 从记第一笔买卖开始就有了。',
+      ]));
     }
 
     if (!built.ok) {

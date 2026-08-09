@@ -108,15 +108,77 @@ var Ledger = (function () {
     function ext(s) { return Portfolio.sum(s.external || {}); }
     if (!prev) {
       return { total: tot(snap), change: null, inflow: null, market: null,
-               external: ext(snap) };
+               netBuy: null, external: ext(snap) };
     }
     var t = tot(snap), p = tot(prev);
+
+    // ⚠️ **两个式子,两个未知数** —— 这是不用手填「本期净投入」的全部理由:
+    //
+    //      现金变化 = 外部净流入 − 净买入 + 分红
+    //      持仓变化 = 净买入 − 分红 + 市场涨跌
+    //
+    //    → 外部净流入 = 现金变化 + 净买入 − 分红      (工资 − 花费)
+    //    → 市场涨跌   = 持仓变化 − 净买入 + 分红
+    //
+    //    净买入和分红来自你记的动作。剩下两个都是解出来的,一个都不用填。
+    //
+    // ⚠️ 分红那一项漏了的话,它会被算成「基金亏了这么多 + 工资多了这么多」——
+    //    两个数同时错,方向相反,而总额完全对得上,所以查不出来。
+    if (typeof Actions !== 'undefined' && Actions.covered(prev.date)) {
+      var nb = Actions.netBuy(prev.date, snap.date).total;
+      var dv = Actions.dividends(prev.date, snap.date).total;
+      var dCash = Portfolio.sum(snap.cash) - Portfolio.sum(prev.cash);
+      var dHeld = Portfolio.sum(snap.holdings) - Portfolio.sum(prev.holdings);
+      return { total: t, change: t - p,
+               inflow: dCash + nb - dv,     // 工资 − 花费
+               market: dHeld - nb + dv,     // 市场让你赚/亏了多少
+               netBuy: nb, dividend: dv,    // 钱在内部搬了多少家
+               source: 'actions', external: ext(snap) };
+    }
+
+    // 退路:老数据手填过 netInflow 的,还认。
+    // ⚠️ 两个都没有就返回 null —— **不拿总额倒推**。
+    //    倒推能编出一条完全虚假的收益曲线,而每个数字看着都合理。
     var has = typeof snap.netInflow === 'number' && !isNaN(snap.netInflow);
     return { total: t, change: t - p,
              inflow: has ? snap.netInflow : null,
              market: has ? t - p - snap.netInflow : null,
-             external: ext(snap) };
+             netBuy: null,
+             source: has ? 'manual' : null, external: ext(snap) };
   }
+
+  /** 逐只基金这一期赚了多少。
+   *
+   *      某只的涨跌 = 它的市值变化 − 你这期买它的钱
+   *
+   *  ⚠️ 没有动作记录的区间返回 `null`,**不返回 0**。
+   *     0 的意思是「没涨没跌」,null 的意思是「不知道」——
+   *     而把后者显示成前者,你会以为这只基金一动没动。 */
+  function perFund(snap, prev) {
+    if (!prev) return null;
+    if (typeof Actions === 'undefined' || !Actions.covered(prev.date)) return null;
+    var by = Actions.netBuy(prev.date, snap.date).byCode;
+    var dv = Actions.dividends(prev.date, snap.date).byCode;
+    var codes = {};
+    Object.keys(snap.holdings || {}).forEach(function (c) { codes[c] = 1; });
+    Object.keys(prev.holdings || {}).forEach(function (c) { codes[c] = 1; });
+    Object.keys(by).forEach(function (c) { codes[c] = 1; });
+    Object.keys(dv).forEach(function (c) { codes[c] = 1; });
+    return Object.keys(codes).map(function (c) {
+      // ⚠️ 这里的 0 是**真的 0**,不是「没填」:某只基金不在某期的持仓里,
+      //    就是那一期没有它。和录入页那个「留空 ≠ 0」是两回事 ——
+      //    所以写成显式的类型判断,而不是 `|| 0`(那个写法分不出两种情况,
+      //    check.sh 也就一律禁掉了)。
+      var now = num((snap.holdings || {})[c]);
+      var was = num((prev.holdings || {})[c]);
+      var bought = num(by[c]), paid = num(dv[c]);
+      return { code: c, from: was, to: now, netBuy: bought, dividend: paid,
+               market: now - was - bought + paid };
+    });
+  }
+
+  /** 没有这一项 = 0(不是「没填」)。见 perFund 里那段注释。 */
+  function num(v) { return typeof v === 'number' && !isNaN(v) ? v : 0; }
 
   // ---------------- 存写入口 ----------------
   //
@@ -163,7 +225,7 @@ var Ledger = (function () {
   function dropDraft() { Store.remove('draft'); }
 
   return { EMPTY: EMPTY, parse: parse, isEmpty: isEmpty,
-           build: build, append: append, latest: latest, delta: delta,
+           build: build, append: append, latest: latest, delta: delta, perFund: perFund,
            commit: commit, removeSnapshot: removeSnapshot,
            saveDraft: saveDraft, loadDraft: loadDraft, dropDraft: dropDraft };
 })();

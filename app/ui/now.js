@@ -208,6 +208,14 @@ var NowUI = (function () {
     });
     body.appendChild(lc);
 
+    // ⚠️ **不通过清单也得能记一笔。**
+    //    清单只覆盖「工具建议你做的事」,而你会临时加仓、会看到机会自己买、
+    //    会收到一笔分红 —— 这些不记的话,下次对账时它们会被算成「市场涨跌」,
+    //    于是收益率错了,而每个数字看着都合理。
+    body.appendChild(h('button', {
+      class: 'btn ghost', style: 'margin-top:20px', onclick: recordOne,
+    }, ['记一笔买卖 / 分红']));
+
     // ⚠️ **录入的入口必须永远在。**
     //    第一版只有「超过 25 天」才给按钮 —— 而录入不占 tab(它是动作不是地方),
     //    于是刚录完的那 25 天里,想补一笔外部资产、想改抄错的数字,一个入口都没有。
@@ -261,6 +269,9 @@ var NowUI = (function () {
   }
 
   function tapTodo(t) {
+    // ⚠️ 勾待办也会写一笔动作,所以这条路也得先把起点问清楚 ——
+    //    否则第一次勾选会留下一笔「不知道该不该算进区间」的记录。
+    if (Actions.needsStart()) { askStart(function () { tapTodo(t); }); return; }
     // ⚠️ 已达标的**不许勾成「做了」**。缺口是市值涨平的,不是你买的 ——
     //    记成 done 会让「说了做了多少 vs 实际投了多少」全错,
     //    而错的方向恰好是让你看起来比实际更自律,于是不会有人怀疑。
@@ -316,6 +327,95 @@ var NowUI = (function () {
       if (!v) return;
       Todos.drop(t.id, v, today());
       render();
+    });
+  }
+
+  /** 手动记一笔 —— 加仓、补仓、临时卖出、收到分红。
+   *
+   *  ⚠️ 三步问完:什么动作 → 哪只 → 多少钱。不做表单页 ——
+   *     这个操作发生在你刚在基金 app 里点完确认的那一刻,
+   *     多一步都会让人想「回头再说」,而回头就忘了。
+   */
+  function recordOne() {
+    // ⚠️ **第一次记账之前,先问清「从哪天算起买卖都记全了」。**
+    //    这是工具没法知道、只有你知道的一件事:上次对账到今天之间,
+    //    你可能买过东西没记。猜的话两种错法都很糟 ——
+    //    猜早了,那几天的买入会被算成「市场涨跌」,数字全错还看不出来;
+    //    猜晚了,整个第一期白等。
+    //    所以问一次,一次就够,以后再也不问。
+    if (Actions.needsStart()) { askStart(recordOne); return; }
+    doRecord();
+  }
+
+  function askStart(then) {
+    var snaps = Store.get('snapshots', []) || [];
+    var last = Ledger.latest(snaps);
+    var opts = [];
+    if (last) {
+      opts.push({ key: last.date, label: last.date + ' 之后的都记全了',
+                  hint: '上次对账那天。这么选的话下次对账就能算出涨跌' });
+    }
+    opts.push({ key: today(), label: '从今天开始记',
+                hint: last ? '上次对账到今天之间买过东西但没记 —— 那要多等一期'
+                           : '之后每笔买卖都记下来' });
+    Modal.pick({
+      title: '从哪天起,买卖都记下来了?',
+      hint: '**只问这一次。** 有了它才分得开「涨了多少」和「你又投了多少」。',
+      options: opts,
+    }).then(function (d) {
+      if (!d) return;
+      Actions.startFrom(d);
+      if (then) then();
+    });
+  }
+
+  function doRecord() {
+    Modal.pick({
+      title: '记一笔',
+      hint: '不记的话,这笔钱下次会被算成「市场涨跌」',
+      options: [
+        { key: 'buy', label: '买入', hint: '加仓 · 补仓 · 定投' },
+        { key: 'sell', label: '卖出', hint: '减仓 · 清仓 · 止盈' },
+        { key: 'dividend', label: '现金分红', hint: '钱从基金打到现金账户' },
+        { key: 'note', label: '记个决定', hint: '改了目标比例之类,不涉及钱' },
+      ],
+    }).then(function (kind) {
+      if (!kind) return;
+      if (kind === 'note') {
+        Modal.ask({ title: '记点什么', hint: '以后回看想知道当时在想什么' })
+          .then(function (txt) {
+            if (!txt) return;
+            Actions.add({ date: today(), kind: 'note', note: txt });
+            render();
+          });
+        return;
+      }
+      var st = Store.get('settings', {}) || {};
+      var funds = (st.funds || []).filter(function (f) { return f.active !== false; });
+      if (!funds.length) {
+        Modal.note({ title: '还没有基金清单', body: '先去设置里加一只。' });
+        return;
+      }
+      Modal.pick({
+        title: '哪一只',
+        options: funds.map(function (f) {
+          return { key: f.code, label: f.name || f.code, hint: f.code + ' · ' + f.category };
+        }),
+      }).then(function (code) {
+        if (!code) return;
+        var f = funds.filter(function (x) { return x.code === code; })[0];
+        Modal.ask({
+          title: { buy: '买了多少', sell: '卖了多少', dividend: '分了多少' }[kind],
+          hint: (f.name || f.code) + ' · 填**实际成交**的金额,不是计划数',
+          type: 'number', suffix: '元',
+        }).then(function (v) {
+          if (v == null || v === '') return;
+          var r = Actions.add({ date: today(), kind: kind, code: f.code,
+                                category: f.category, amount: parseFloat(v) });
+          if (!r.ok) { Modal.note({ title: '记不下来', body: r.why }); return; }
+          render();
+        });
+      });
     });
   }
 

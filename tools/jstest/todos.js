@@ -15,6 +15,7 @@ global.Store = {
   set: function (k, v) { mem[k] = v; },
   remove: function (k) { delete mem[k]; },
 };
+global.Actions = require(path.join(A, 'core', 'actions.js'));
 var Todos = require(path.join(A, 'core', 'todos.js'));
 
 var fail = 0;

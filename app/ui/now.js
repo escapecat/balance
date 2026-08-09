@@ -20,6 +20,7 @@ var NowUI = (function () {
   //    已经做完的清单挡着，久了就自动忽略 —— 那它该提醒你的时候也提醒不动了。
   var el, onEntry = null;
   var view = 'home';
+  var pendingPlan = false;   // 刚存完一期 —— 下次 mount 直接进方案屏
 
   function h(tag, attrs, kids) {
     var n = document.createElement(tag);
@@ -51,8 +52,13 @@ var NowUI = (function () {
     return today().slice(5, 7).replace(/^0/, '') + ' 月';
   }
 
-  /** 录完一期之后跳过来。app.js 在 EntryUI 的 onDone(true) 里调。 */
-  function showPlan() { view = 'plan'; }
+  /** 录完一期之后跳过来。app.js 在 EntryUI 的 onDone(true) 里调。
+   *
+   *  ⚠️ 这里**只是举个手**,不直接改 view —— 因为 app.js 调完它才 mount,
+   *     而 mount 要把 view 拨回 home(不然你在方案屏切去统计再切回来,
+   *     看到的还是方案屏,而那一屏是「刚录完」的产物,过后再看很莫名)。
+   *     直接设 view 的话会被紧接着的 mount 抹掉,showPlan 白调。 */
+  function showPlan() { pendingPlan = true; }
 
   var NS = 'http://www.w3.org/2000/svg';
   /** ⚠️ SVG 得用带命名空间的创建方式。用 createElement 建出来的
@@ -399,16 +405,23 @@ var NowUI = (function () {
     //    而每一条都会直接歪掉「工资−花费」和「市场涨跌」这两个数
     //    (漏记 5 万 = 凭空多 5 万花费 + 凭空多 5 万浮盈,总额还对得上)。
     //    core/actions.js 里 remove() 早就写好了,只是从来没人调用它。
-    var acts = Actions.between(snap.date, null);
+    // ⚠️ 只列**清单外**的。清单上的那几条勾掉之后自己就变成已完成
+    //    (划线、变灰),在这儿再列一遍就是同一笔显示两次 ——
+    //    而两处金额一旦看着不一样(比如清单显示计划数、这儿显示实际数),
+    //    你根本不知道该信哪个。
+    //    带 todoId 的就是从清单勾掉的,过滤掉。
+    var acts = Actions.between(snap.date, null).filter(function (a) { return !a.todoId; });
     if (acts.length) {
       var nb = 0;
       acts.forEach(function (a) { nb += (a.kind === 'sell' ? -1 : 1) * a.amount; });
       // ⚠️ 标题说「已经做了」,不能只叫「这一期记的买卖」——
       //    这一屏叫「该做什么」,里面冒出一份买卖清单,
       //    第一眼分不清是「建议你买」还是「你买过了」。
+      // 叫「清单外记的」而不是「已经做了」—— 清单上勾掉的那几条
+      // 也是「已经做了」,却不在这个列表里,两个名字对不上会让人以为漏了。
       body.appendChild(h('h2', {}, [
-        '已经做了',
-        h('span', { class: 'n' }, [acts.length + ' 笔 · 净买入 ¥' + money(nb)]),
+        '清单外记的',
+        h('span', { class: 'n' }, [acts.length + ' 笔 · 净 ¥' + money(nb)]),
       ]));
       var al = h('div', { class: 'list' });
       acts.slice().sort(function (a, b) {
@@ -454,13 +467,9 @@ var NowUI = (function () {
       body.appendChild(al);
     }
 
-    // ⚠️ **不通过清单也得能记一笔。**
-    //    清单只覆盖「工具建议你做的事」,而你会临时加仓、会看到机会自己买、
-    //    会收到一笔分红 —— 这些不记的话,下次对账时它们会被算成「市场涨跌」,
-    //    于是收益率错了,而每个数字看着都合理。
-    body.appendChild(h('button', {
-      class: 'btn ghost', style: 'margin-top:20px', onclick: recordOne,
-    }, ['记一笔买卖 / 分红']));
+    // ⚠️ 这里**没有「记一笔买卖」按钮** —— 主界面已经有一个了。
+    //    清单上的那几条直接点行就能填实际金额;清单外的临时加仓回主界面记。
+    //    同一个动作在两屏各摆一个入口,只会让人想「这两个是不是不一样的东西」。
 
     // ⚠️ **录入的入口必须永远在。**
     //    第一版只有「超过 25 天」才给按钮 —— 而录入不占 tab(它是动作不是地方),
@@ -678,6 +687,8 @@ var NowUI = (function () {
   function mount(node, opts) {
     el = node;
     onEntry = (opts || {}).onEntry || function () {};
+    view = pendingPlan ? 'plan' : 'home';
+    pendingPlan = false;
     render();
   }
 

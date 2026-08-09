@@ -38,6 +38,7 @@ var SettingsUI = (function () {
     var s = st();
     var snaps = Store.get('snapshots', []) || [];
     var snap = Ledger.latest(snaps);
+    var sm = snap ? Portfolio.summarize(snap, s) : null;
 
     w.appendChild(h('h1', {}, ['设置']));
 
@@ -157,14 +158,27 @@ var SettingsUI = (function () {
     }, ['＋ 加一只基金']));
 
     // ---- 现金 ----
+    // ⚠️ 这两项**一起决定「留多少现金不投」**,取更严的那个。
+    //    分开写是因为它们管的是不同的事,而只守一个都会出问题:
+    //    只守绝对数 → 资产涨上去之后备用金相对越来越薄;
+    //    只守比例   → 刚起步时留的钱可能连一次应急都不够。
     w.appendChild(h('h2', {}, ['现金']));
     w.appendChild(h('div', { class: 'list' }, [
-      numItem('现金保底', '低于这个数就不再拿去买东西', 'cashFloor', s.cashFloor, ''),
-      numItem('现金目标占比', '现金也是一个类别,它常常是最大的偏离项',
+      numItem('现金保底', '绝对下限。不管总额多少,至少留这么多', 'cashFloor', s.cashFloor, ''),
+      numItem('现金目标占比', '现金也是一个类别。总额涨了,备用金跟着涨',
               'cashTarget', Math.round((s.cashTarget || 0) * 1000) / 10, '%'),
       numItem('偏差带', '偏差超过这么多个百分点,年度再平衡才动手',
               'band', Math.round((s.band || 0) * 1000) / 10, '%'),
     ]));
+    // 把「实际会留多少」算出来摆在这儿 —— 两个设置各是什么效果,
+    // 光看设置项是想不出来的,得看它们合起来的结果。
+    if (snap) {
+      var keep = Math.max(s.cashFloor || 0, (s.cashTarget || 0) * sm.total);
+      w.appendChild(h('div', { class: 'hint' }, [
+        '现在会留下 **¥' + money(keep) + '** 不投(两个里取更严的)' +
+        ',其余 ¥' + money(Math.max(0, sm.cash - keep)) + ' 才拿去买。',
+      ]));
+    }
 
     // ---- 组合之外 ----
     //

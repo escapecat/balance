@@ -64,9 +64,27 @@ var Portfolio = (function () {
     return { total: total, invested: invested, cash: cash, rows: rows };
   }
 
-  /** 可以拿去买东西的钱 = 现金 − 保底。不够就是 0,不返回负数。 */
+  /** 可以拿去买东西的钱。
+   *
+   *  ⚠️ **要留下的现金 = max(绝对保底, 目标占比 × 总额)**,两个条件都得满足。
+   *
+   *     第一版只减了 `cashFloor`,于是同一屏上出现两个打架的数:
+   *     配置表(现金也是一个类别,目标 5%)说「现金超配 19 万」,
+   *     而这里说「可投 29 万」—— 照后者做,现金会被抽到只剩保底那 1 万,
+   *     占比 0.5%,而你明明把现金目标设成了 5%。
+   *
+   *     两个设置是不同的东西,都得守:
+   *       cashFloor  —— 绝对下限。应急用的钱,跌到这个数以下不许再投
+   *       cashTarget —— 比例目标。现金作为一个类别,它也有自己的位置
+   *     总资产涨上去之后,后者会自动超过前者 —— 这正是「保持一定现金流」
+   *     该有的行为:钱多了,备用金也该跟着多。
+   */
   function investableCash(snap, settings) {
-    return Math.max(0, sum(snap.cash || {}) - (settings.cashFloor || 0));
+    var cash = sum(snap.cash || {});
+    var total = sum(snap.holdings || {}) + cash;
+    var floor = settings.cashFloor || 0;
+    var byTarget = (settings.cashTarget != null ? settings.cashTarget : 0) * total;
+    return Math.max(0, cash - Math.max(floor, byTarget));
   }
 
   return { byCategory: byCategory, sum: sum, summarize: summarize,

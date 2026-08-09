@@ -196,6 +196,32 @@ var SettingsUI = (function () {
       onclick: function () { editAsset(null); },
     }, ['＋ 加一项']));
 
+    // ---- 买卖记录 ----
+    //
+    // ⚠️ 平时不用管。放在这儿是因为**万一哪期算得不对,得有地方能改** ——
+    //    唯一会出错的情况是「某次对账之后买过东西但没记」,
+    //    那笔会被算成「市场涨跌」。把起点往后挪一期,那期就退回「分不出」,
+    //    总比留着一个错的数强。
+    var since = Actions.since();
+    if (since) {
+      w.appendChild(h('h2', {}, ['买卖记录']));
+      w.appendChild(h('div', { class: 'list' }, [
+        h('div', {
+          class: 'list-row',
+          onclick: function () { editSince(since); },
+        }, [
+          h('div', { class: 'body' }, [
+            h('div', { class: 'ttl' }, ['从 ' + since + ' 起记全了']),
+            h('div', { class: 'sub2' }, [
+              '这天之后的每一期都能算出涨跌 · 共 ' +
+              Actions.all().length + ' 笔记录',
+            ]),
+          ]),
+          h('span', { class: 'dim' }, ['▸']),
+        ]),
+      ]));
+    }
+
     // ---- 备份 ----
     w.appendChild(h('h2', {}, ['备份']));
     w.appendChild(h('div', { class: 'hint', style: 'margin-bottom:8px' }, [
@@ -326,6 +352,27 @@ var SettingsUI = (function () {
       if (v === 'active') patch.active = f.active === false;
       if (v === 'phasing') patch.status = f.status === 'phasing_out' ? null : 'phasing_out';
       Config.upsertFund(Object.assign({}, f, patch), false);
+      render();
+    });
+  }
+
+  /** 改「从哪天起买卖记全了」。选项就是各期对账日 —— 起点落在两次对账
+   *  中间是没意义的:一期要么整个算得出来,要么整个算不出来。 */
+  function editSince(cur) {
+    var snaps = Store.get('snapshots', []) || [];
+    var opts = snaps.slice().reverse().slice(0, 6).map(function (s) {
+      return { key: s.date, label: s.date + (s.date === cur ? '(现在)' : ''),
+               hint: s.date === cur ? '' : '这天之后的期数才算得出涨跌' };
+    });
+    Modal.pick({
+      title: '从哪天起,买卖都记全了?',
+      hint: '**往后挪**:某期漏记过买入,把它退回「分不出」比留个错数强。\n' +
+            '**往前挪**:补录了更早的买卖之后,让那几期也算得出来。',
+      options: opts,
+    }).then(function (d) {
+      if (!d || d === cur) return;
+      Actions.startFrom(d);
+      if (onChanged) onChanged();
       render();
     });
   }

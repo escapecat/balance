@@ -269,9 +269,11 @@ var NowUI = (function () {
   }
 
   function tapTodo(t) {
-    // ⚠️ 勾待办也会写一笔动作,所以这条路也得先把起点问清楚 ——
-    //    否则第一次勾选会留下一笔「不知道该不该算进区间」的记录。
-    if (Actions.needsStart()) { askStart(function () { tapTodo(t); }); return; }
+    // 勾待办也会写一笔动作 —— 起点同样默认成最近一期对账日
+    if (Actions.needsStart()) {
+      var last0 = Ledger.latest(Store.get('snapshots', []) || []);
+      Actions.startFrom(last0 ? last0.date : today());
+    }
     // ⚠️ 已达标的**不许勾成「做了」**。缺口是市值涨平的,不是你买的 ——
     //    记成 done 会让「说了做了多少 vs 实际投了多少」全错,
     //    而错的方向恰好是让你看起来比实际更自律,于是不会有人怀疑。
@@ -337,39 +339,18 @@ var NowUI = (function () {
    *     多一步都会让人想「回头再说」,而回头就忘了。
    */
   function recordOne() {
-    // ⚠️ 第一次记账之前问一句「上次对账之后买卖过没有」。
-    //    这是工具没法知道、只有你知道的一件事 —— 而它决定了
-    //    这一期的涨跌算不算得出来。问一次,以后再也不问。
-    if (Actions.needsStart()) { askStart(recordOne); return; }
+    // 记录的起点默认就是**最近一期对账日** —— 因为你的做法是「买了就录」,
+    // 所以从上次对账起,记录天然是全的。不问,直接定。
+    //
+    // ⚠️ 唯一会出错的情况是「上次对账之后买过东西但没记」。
+    //    那种情况下这里会把那笔算成「市场涨跌」。
+    //    所以设置页里留了一行能改起点,而补录的入口就在下面那一屏 ——
+    //    两条后路都留着,但不拿一个问题挡在每个人前面。
+    if (Actions.needsStart()) {
+      var last = Ledger.latest(Store.get('snapshots', []) || []);
+      Actions.startFrom(last ? last.date : today());
+    }
     doRecord();
-  }
-
-  function askStart(then) {
-    var snaps = Store.get('snapshots', []) || [];
-    var last = Ledger.latest(snaps);
-    if (!last) { Actions.startFrom(today()); if (then) then(); return; }
-
-    // ⚠️ 问的是**你知道答案的那个问题**:上次对账之后买卖过没有。
-    //    不要问「从哪天开始记账」—— 那是工具的内部概念,
-    //    而你的做法本来就是「买了就录」。
-    Modal.pick({
-      title: last.date + ' 之后,买卖过基金吗?',
-      hint: '**只问这一次。** 有了这个才分得开「涨了多少」和「你又投了多少」。',
-      options: [
-        { key: 'none', label: '没有',
-          hint: '那从 ' + last.date + ' 算起就是全的,下次对账就能算出涨跌' },
-        { key: 'backfill', label: '有,我现在补录',
-          hint: '几笔都行,日期填当时的' },
-        { key: 'today', label: '记不清了,从今天算',
-          hint: '安全但要多等一期 —— 这一期的涨跌仍然分不出来' },
-      ],
-    }).then(function (v) {
-      if (!v) return;
-      if (v === 'today') { Actions.startFrom(today()); if (then) then(); return; }
-      Actions.startFrom(last.date);
-      if (v === 'backfill') { doRecord(last.date); return; }
-      if (then) then();
-    });
   }
 
   /** @param backfillFrom 补录模式:给个日期下限,让人填当时的日期 */
@@ -382,9 +363,16 @@ var NowUI = (function () {
         { key: 'sell', label: '卖出', hint: '减仓 · 清仓 · 止盈' },
         { key: 'dividend', label: '现金分红', hint: '钱从基金打到现金账户' },
         { key: 'note', label: '记个决定', hint: '改了目标比例之类,不涉及钱' },
+        { key: 'back', label: '补录之前的一笔', hint: '日期填当时的' },
       ],
     }).then(function (kind) {
       if (!kind) return;
+      // 补录走同一条流程,只是最后多问一次日期
+      if (kind === 'back') {
+        var last = Ledger.latest(Store.get('snapshots', []) || []);
+        doRecord(last ? last.date : '1970-01-01');
+        return;
+      }
       if (kind === 'note') {
         Modal.ask({ title: '记点什么', hint: '以后回看想知道当时在想什么' })
           .then(function (txt) {

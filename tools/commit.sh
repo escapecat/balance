@@ -33,6 +33,20 @@ STAMP=$(date +'%m-%d %H:%M')
 sed -i "s|<meta name=\"build\" content=\"[^\"]*\">|<meta name=\"build\" content=\"$STAMP\">|" \
     app/index.html
 
+# ⚠️ **每个资源都要带版本号,不然时间戳只是给我自己看的。**
+#    以前 script/link 全是裸 URL,浏览器和 Service Worker 各自按老规矩缓存,
+#    于是「改了怎么还是老的」反复发生 —— 而 meta 里那个时间戳
+#    完全不影响浏览器要不要重新下载,它只是个自我安慰。
+#
+#    最坏的一次:新增了 data/palette.js。index.html 走缓存的话
+#    那个文件根本不会被请求,而 now.js 里 Palette.color() 直接抛错 ——
+#    页面渲染到一半停住,控制台之外没有任何提示。
+#    **加文件比改文件危险**,因为改文件顶多显示旧内容,加文件是崩。
+VER=$(date +'%m%d%H%M')
+sed -i -E "s|(<script src=\"[^\":?]+\.js)(\?v=[0-9]+)?\"|\1?v=$VER\"|g;
+           s|(<link rel=\"stylesheet\" href=\"[^\":?]+\.css)(\?v=[0-9]+)?\"|\1?v=$VER\"|g" \
+    app/index.html
+
 git add -A || { rm -f "$MSGFILE"; exit 1; }
 git commit -F "$MSGFILE"
 rc=$?

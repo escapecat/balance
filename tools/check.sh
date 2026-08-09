@@ -20,14 +20,23 @@ done
 
 # ---- index.html 引用的文件都得真实存在 ----
 # 少一个页面就白屏,而白屏在控制台之外没有任何提示。
+#
+# ⚠️ 得**先剥掉 `?v=` 版本号**再查。资源带版本号是为了破缓存
+#    (见 commit.sh),但版本号一加,原来那个按 `\.js"` 结尾的匹配
+#    就一个都匹配不到了 —— 守卫不会报错,它只是从此什么都不检查。
+#    这类「守卫静默失效」比守卫报错危险得多:每次提交照样打勾。
 if [ -e app/index.html ]; then
-  for src in $(grep -o 'src="[^"]*\.js"' app/index.html | sed 's/src="//;s/"//'); do
+  for src in $(grep -o 'src="[^"]*\.js\(?v=[0-9]*\)\?"' app/index.html \
+               | sed 's/src="//;s/"//;s/?v=[0-9]*$//'); do
     [ -e "app/$src" ] || { echo "✗ index.html 引用了不存在的 $src"; fail=1; }
   done
-  for href in $(grep -o 'href="[^"]*\.\(png\|webmanifest\|css\)"' app/index.html \
-                | sed 's/href="//;s/"//'); do
+  for href in $(grep -o 'href="[^"]*\.\(png\|webmanifest\|css\)\(?v=[0-9]*\)\?"' app/index.html \
+                | sed 's/href="//;s/"//;s/?v=[0-9]*$//'); do
     [ -e "app/$href" ] || { echo "✗ index.html 引用了不存在的 $href"; fail=1; }
   done
+  # 引用一个都没查到 = 上面的正则被 index.html 的写法绕过去了,当失败处理
+  n=$(grep -c 'src="[^"]*\.js\(?v=[0-9]*\)\?"' app/index.html)
+  [ "$n" -ge 5 ] || { echo "✗ 只匹配到 $n 个脚本引用 —— 正则和 index.html 对不上了"; fail=1; }
 fi
 
 # ---- 回归测试 ----

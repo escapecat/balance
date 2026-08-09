@@ -240,6 +240,66 @@ var NowUI = (function () {
     });
     body.appendChild(lc);
 
+    // ---- 本期已记的买卖 ----
+    //
+    // ⚠️ **记完之后必须看得见,而且必须能删。**
+    //    早先只有「记一笔」这个入口:记完就沉进 flows[] 再也见不到。
+    //    金额敲错一位、买卖点反、同一笔手滑记两遍 —— 一个都发现不了,
+    //    而每一条都会直接歪掉「工资−花费」和「市场涨跌」这两个数
+    //    (漏记 5 万 = 凭空多 5 万花费 + 凭空多 5 万浮盈,总额还对得上)。
+    //    core/actions.js 里 remove() 早就写好了,只是从来没人调用它。
+    var acts = Actions.between(snap.date, null);
+    if (acts.length) {
+      var nb = 0;
+      acts.forEach(function (a) { nb += (a.kind === 'sell' ? -1 : 1) * a.amount; });
+      body.appendChild(h('h2', {}, [
+        '这一期记的买卖',
+        h('span', { class: 'n' }, [acts.length + ' 笔 · 净买入 ¥' + money(nb)]),
+      ]));
+      var al = h('div', { class: 'list' });
+      acts.slice().sort(function (a, b) {
+        return a.date < b.date ? 1 : -1;          // 新的在上面
+      }).forEach(function (a) {
+        var f = (st.funds || []).filter(function (x) { return x.code === a.code; })[0];
+        var row = h('div', { class: 'list-row' });
+        row.appendChild(h('div', {
+          class: 'body', style: '--c:' + Palette.color(a.category),
+        }, [
+          h('div', { class: 'ttl' }, [
+            h('i', { class: 'dot' }),
+            (a.kind === 'sell' ? '卖 ' : '买 ') + a.category,
+          ]),
+          h('div', { class: 'sub2' }, [
+            (f ? (f.name || a.code) : a.code) + ' · ' + a.date.slice(5).replace('-', '/'),
+          ]),
+        ]));
+        row.appendChild(h('div', { class: 'amt' }, [
+          h('span', { class: 'u' }, [a.kind === 'sell' ? '−¥' : '¥']), money(a.amount),
+        ]));
+        row.appendChild(h('button', {
+          class: 'act warn', title: '删掉这一笔',
+          onclick: function (e) {
+            e.stopPropagation();
+            Modal.confirm({
+              title: '删掉这一笔?',
+              // ⚠️ 说清后果。删掉不是「撤销一次误操作」那么轻 ——
+              //    它会同时改动这一期的「工资−花费」和「市场涨跌」。
+              body: (a.kind === 'sell' ? '卖 ' : '买 ') + a.category + ' ¥' + money(a.amount) +
+                    '\n\n删了之后,这笔钱会被重新算进「市场涨跌」—— ' +
+                    '真买过的话,数字就错了。',
+              danger: true, ok: '删掉',
+            }).then(function (yes) {
+              if (!yes) return;
+              Actions.remove(a.id);
+              render();
+            });
+          },
+        }, ['删']));
+        al.appendChild(row);
+      });
+      body.appendChild(al);
+    }
+
     // ⚠️ **不通过清单也得能记一笔。**
     //    清单只覆盖「工具建议你做的事」,而你会临时加仓、会看到机会自己买、
     //    会收到一笔分红 —— 这些不记的话,下次对账时它们会被算成「市场涨跌」,

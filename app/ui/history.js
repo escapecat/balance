@@ -254,20 +254,29 @@ var HistoryUI = (function () {
 
     w.appendChild(h('h1', {}, [v.snap.date]));
 
-    // 那天的账 —— 和首页 hero 一个格式,不用重新适应
-    var hero = h('div', { class: 'hero', style: 'padding-top:0' });
+    // 那天的账 —— 和首页 hero 一个格式,不用重新适应。
+    //
+    // ⚠️ **结构必须和 now.js 那份逐字一致**。这两处是各写一遍的,
+    //    改版时我只动了 now.js,这边就成了「新背景 + 旧结构」:
+    //    数字贴着顶(inline 的 padding-top:0 把卡片内边距干掉了)、
+    //    组合和组合外挤成一行没样式的灰字。
+    //    抽成共享组件才是根治 —— 在那之前,改一边**务必**回来改这边。
+    var hero = h('div', { class: 'hero' });
+    hero.appendChild(h('div', { class: 'hero-cap' }, ['当期总额']));
     hero.appendChild(h('div', { class: 'hero-num' },
                        ['¥' + money(d.total + (d.external || 0))]));
-    var sub = h('div', { class: 'hero-sub' });
-    sub.appendChild(h('span', {}, [
-      h('span', { class: 'k' }, ['组合 ']), h('span', { class: 'v' }, [money(d.total)]),
+    var split = h('div', { class: 'hero-split' });
+    split.appendChild(h('div', {}, [
+      h('span', { class: 'k' }, ['投资组合']),
+      h('span', { class: 'v' }, ['¥' + money(d.total)]),
     ]));
     if (d.external) {
-      sub.appendChild(h('span', {}, [
-        h('span', { class: 'k' }, ['组合外 ']), h('span', { class: 'v' }, [money(d.external)]),
+      split.appendChild(h('div', {}, [
+        h('span', { class: 'k' }, ['组合外']),
+        h('span', { class: 'v' }, ['¥' + money(d.external)]),
       ]));
     }
-    hero.appendChild(sub);
+    hero.appendChild(split);
     w.appendChild(hero);
 
     if (d.change != null) {

@@ -208,8 +208,23 @@ body {
    底部露出来的背景不再是问题：--bg 和 --surface 现在是同一个值。 */
 .wrap { max-width: 560px; margin: 0 auto; padding: var(--s4); }
 
-/* .fill-rest 已废弃 —— 它靠拉伸最后一块列表填空白，而那依赖上面那个
-   min-height。app.js 里也不再盖这个 class。 */
+/* ⚠️ 内容区撑满之后（app.js 的 fitHeight 用实测值设 min-height），
+   .wrap 变成 flex 竖排，最后一块列表把多出来的空间吃掉 ——
+   不然撑开的只是一片空背景，和没撑一样。
+   ⚠️ 这一层**必须配合实测的 min-height**：用 CSS 单位猜高度的那一版
+   会让页面多出可滚动空间，切 tab 时忽能滑忽不能滑。 */
+.wrap { display: flex; flex-direction: column; }
+.fill-rest {
+  flex: 1 0 auto;
+  /* 抵消 .wrap 的下内边距，让它真的贴到 tab 栏 */
+  margin-bottom: calc(var(--s4) * -1);
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.fill-rest > :last-child {
+  border-bottom-left-radius: 0 !important;
+  border-bottom-right-radius: 0 !important;
+}
 
 h1 { font-size: var(--t-lg); font-weight: 650; margin: var(--s1) 0 var(--s1);
      letter-spacing: -.01em; }

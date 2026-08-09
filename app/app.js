@@ -119,18 +119,68 @@
     } else {
       NowUI.mount(page, { onEntry: function () { entering = true; render(); } });
     }
+    fillRest(page);
     root.appendChild(page);
     root.appendChild(tabbar());
+    fitHeight(page);
   }
 
-  /** ⚠️ fillRest 已删。它靠拉伸最后一块列表去填底部空白，
-   *  而那依赖 .wrap 的 min-height —— 那一行让短页面多出 34px 可滚动空间，
-   *  切 tab 时手上的反馈忽有忽无，也就是「上下跳」。
-   *  空白改由「页面底色 = 卡片底色」解决，不需要拉伸任何东西。 */
+  /** 把内容区**正好**撑到 tab 栏顶边。
+   *
+   *  ⚠️ **用实测值，不用 CSS 单位去猜。**
+   *     上一版写的是 `min-height: calc(100svh - 53px - env(...))` ——
+   *     `100svh` 含底部安全区而实际可视高度不含，差 34px，
+   *     于是每个短页面都多出 34px 可以滑动，滑一下弹回来，
+   *     切 tab 时有的页能滑有的不能，手上就是「上下跳」。
+   *     那一串 calc 里的每一项都是我假设的，而假设错一项就是这个结果。
+   *
+   *     现在只做一件事：量 tab 栏顶边在哪，把内容区撑到那儿。
+   *     元素已经插进文档了，量出来的是真实渲染位置，没有假设。
+   *
+   *  ⚠️ 先清空再量 —— 上一次设的 min-height 会把这次的测量顶大，
+   *     几次切换下来页面越来越长。
+   */
+  function fitHeight(page) {
+    var wrap = page.querySelector && page.querySelector('.wrap');
+    var bar = document.querySelector && document.querySelector('.tabbar');
+    if (!wrap || !bar || !wrap.getBoundingClientRect) return;
+    try {
+      wrap.style.minHeight = '';
+      var barTop = bar.getBoundingClientRect().top;
+      var wrapTop = wrap.getBoundingClientRect().top;
+      var h = Math.floor(barTop - wrapTop);
+      if (h > 0) wrap.style.minHeight = h + 'px';
+    } catch (e) {}
+  }
+
+  /** 让最后一块内容容器吃掉撑出来的空间。
+   *  ⚠️ 只拉伸**真正排在最后**的那一块 —— 后面还有按钮的话拉它，
+   *     等于把按钮推到屏幕最底下，中间空一大块。
+   *  ⚠️ 空状态那一屏不拉（它自己居中）。 */
+  function fillRest(page) {
+    var wrap = page.querySelector && page.querySelector('.wrap');
+    if (!wrap || (wrap.className || '').indexOf('wrap-fill') >= 0) return;
+    var kids = wrap.children || [];
+    var last = kids[kids.length - 1];
+    if (!last) return;
+    var c = (last.className || '');
+    if (c.indexOf('list') >= 0 || c.indexOf('card') >= 0 || c.indexOf('chart') >= 0) {
+      last.className = c + ' fill-rest';
+    }
+  }
 
 
 
   render();
+
+  // 转屏、键盘收起、窗口缩放 —— 高度变了就重新量一次。
+  // ⚠️ 不重量的话，横屏转回竖屏时内容区还停在横屏那个高度。
+  if (typeof window !== 'undefined' && window.addEventListener) {
+    window.addEventListener('resize', function () {
+      var page = root.children && root.children[0];
+      if (page) fitHeight(page);
+    });
+  }
 
   // ⚠️ **开机拉一次。** 不然同步就只有「推」没有「拉」——
   //    手机上录完推上去,电脑打开还是旧数据,你在旧数据上一改就冲突,

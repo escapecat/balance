@@ -235,6 +235,27 @@ var SettingsUI = (function () {
       ]));
     }
 
+    // ---- 版本 ----
+    //
+    // ⚠️ 「我改了你怎么还是老样子」这种事,不给版本号就只能靠猜。
+    //    显示构建时间(index.html 里的 <meta name="build">)——
+    //    你一眼就能知道手机上跑的是不是最新那版。
+    var build = null;
+    try {
+      var m = document.querySelector('meta[name="build"]');
+      build = m && m.getAttribute('content');
+    } catch (e) {}
+    w.appendChild(h('h2', {}, ['版本']));
+    w.appendChild(h('div', { class: 'list' }, [
+      h('div', { class: 'list-row', onclick: hardReload }, [
+        h('div', { class: 'body' }, [
+          h('div', { class: 'ttl' }, [build || '(未知)']),
+          h('div', { class: 'sub2' }, ['点一下强制拿最新版']),
+        ]),
+        h('span', { class: 'chev' }),
+      ]),
+    ]));
+
     // ---- 备份 ----
     w.appendChild(h('h2', {}, ['备份']));
     w.appendChild(h('div', { class: 'hint', style: 'margin-bottom:8px' }, [
@@ -521,6 +542,19 @@ var SettingsUI = (function () {
     a.download = 'balance-' + new Date().toISOString().slice(0, 10) + '.json';
     a.click();
     setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+  }
+
+  /** 强制拿最新版:清掉 Service Worker 的缓存再重载。
+   *  ⚠️ **只清缓存,不碰 localStorage** —— 数据一个字节都不动。 */
+  function hardReload() {
+    var done = function () { location.reload(true); };
+    try {
+      if (typeof caches === 'undefined') return done();
+      caches.keys().then(function (names) {
+        return Promise.all(names.filter(function (n) { return n.indexOf('balance-') === 0; })
+                               .map(function (n) { return caches.delete(n); }));
+      }).then(done, done);
+    } catch (e) { done(); }
   }
 
   /** 退回上一个状态。**当前状态会存成新的回滚点** ——

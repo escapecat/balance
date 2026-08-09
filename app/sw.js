@@ -21,7 +21,7 @@
 //    表现是「另一个 app 突然离线打不开了」,而你根本想不到是这边干的。
 
 var PREFIX = 'balance-';
-var CACHE = PREFIX + 'v1';
+var CACHE = PREFIX + 'v2';   // 换名字 = 旧缓存作废,拿新策略重新来过
 
 self.addEventListener('install', function (e) {
   self.skipWaiting();          // 新的装好就顶上,不用等所有标签页关掉
@@ -42,33 +42,36 @@ self.addEventListener('fetch', function (e) {
   var req = e.request;
   if (req.method !== 'GET') return;
 
-  // 页面本身:先网络,断网了再吃缓存
-  if (req.mode === 'navigate' || (req.headers.get('accept') || '').indexOf('text/html') >= 0) {
-    e.respondWith(
-      fetch(req).then(function (res) {
+  // ⚠️ **全部先走网络,断网了才吃缓存。**
+  //
+  //    第一版给 css/js 用的是「先给缓存,后台悄悄更新」——
+  //    理论上很美(秒开 + 下次就新),实际体验是**「我改了你看不见」**:
+  //    刷新一次拿到的还是旧的,得刷第二次。
+  //    更糟的是 index.html 走的是先网络,于是新 HTML 配旧 JS,
+  //    出问题的样子完全没法解释。
+  //
+  //    这套代码总共 200 多 KB,先走网络那点延迟根本感觉不到,
+  //    而「改了立刻能看到」在还天天改的阶段值得多了。
+  //    离线能力一点没丢:拿不到网络就回缓存,和以前一样。
+  //
+  //    等哪天真的不怎么改了,再换回 stale-while-revalidate 也不迟。
+  e.respondWith(
+    fetch(req).then(function (res) {
+      if (res && res.status === 200 && res.type === 'basic') {
         var copy = res.clone();
         caches.open(CACHE).then(function (c) { c.put(req, copy); });
-        return res;
-      }).catch(function () {
-        return caches.match(req).then(function (hit) {
-          return hit || caches.match('index.html');
-        });
-      })
-    );
-    return;
-  }
-
-  // 其它:先缓存(离线也能用),后台顺手更新
-  e.respondWith(
-    caches.match(req).then(function (hit) {
-      var fresh = fetch(req).then(function (res) {
-        if (res && res.status === 200) {
-          var copy = res.clone();
-          caches.open(CACHE).then(function (c) { c.put(req, copy); });
+      }
+      return res;
+    }).catch(function () {
+      return caches.match(req).then(function (hit) {
+        // 页面本身取不到就回首页,别给一个白屏
+        if (hit) return hit;
+        if (req.mode === 'navigate' ||
+            (req.headers.get('accept') || '').indexOf('text/html') >= 0) {
+          return caches.match('index.html');
         }
-        return res;
-      }).catch(function () { return hit; });
-      return hit || fresh;
+        return Response.error();
+      });
     })
   );
 });

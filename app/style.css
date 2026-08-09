@@ -65,17 +65,26 @@
   --hero-line: rgba(255,255,255,.16);
 
   /* 类别色 —— 语义由 data/palette.js 指派,这里只管长什么样。
+     **按资产大类分色相,组内靠明度分档**:权益蓝紫 · 黄金金 · 债券绿 · 现金灰。
+     饱和度和明度统一过,不会有哪一块特别跳。
+
      ⚠️ 饱和度压在中档:钱的界面上,高饱和的一排色块看着像玩具。
-        彼此拉开的是**色相和明度**,不是艳度。 */
-  --cat-a: #3059c2;  --cat-a-soft: #e8edfa;   /* 标普500  靛 */
-  --cat-b: #0d8593;  --cat-b-soft: #e0f2f4;   /* 纳指100  青 */
-  --cat-c: #bf8618;  --cat-c-soft: #fbf0dc;   /* 黄金     金 */
-  --cat-d: #9c4478;  --cat-d-soft: #f7e9f1;   /* 红利低波 玫 */
-  --cat-e: #2c8657;  --cat-e-soft: #e2f2e9;   /* 中长债   绿 */
-  --cat-f: #679b45;  --cat-f-soft: #ecf4e4;   /* 中短债   浅绿 */
-  --cat-g: #7c8390;  --cat-g-soft: #eef0f3;   /* 现金     灰 */
+        彼此拉开的是**色相和明度**,不是艳度。
+
+     ⚠️ 变量顺序按 palette.js 的槽位(a..i),**不是**按显示顺序 ——
+        c 是黄金、d 是红利低波,所以这里 d 排在 c 前面。
+        挑选那版对比页就栽在这上面:颜色数组按类别顺序硬排,
+        而设计意图是按语义分组,结果预览里黄金是紫的、红利低波是金的。
+        和 stats.js 里那个「按索引取色」是同一个病。 */
+  --cat-a: #2d5aa8;  --cat-a-soft: #e9eef8;   /* 标普500  蓝   ┐ */
+  --cat-b: #4d84c9;  --cat-b-soft: #edf3fb;   /* 纳指100  浅蓝 ├ 权益一族 */
+  --cat-d: #8a6fb0;  --cat-d-soft: #f2ecf7;   /* 红利低波 紫   ┘ */
+  --cat-c: #b8862a;  --cat-c-soft: #f8f1e0;   /* 黄金     金 */
+  --cat-e: #2f7d5e;  --cat-e-soft: #e4f1eb;   /* 中长债   绿   ┐ 债券一族 */
+  --cat-f: #5aa37b;  --cat-f-soft: #ebf5f0;   /* 中短债   浅绿 ┘ */
+  --cat-g: #8b929e;  --cat-g-soft: #eef0f3;   /* 现金     灰 */
   --cat-h: #8a6b4f;  --cat-h-soft: #f2ece6;   /* 未分类   棕 */
-  --cat-i: #5a6b8a;  --cat-i-soft: #eaedf3;   /* 组合外   蓝灰 */
+  --cat-i: #6b7385;  --cat-i-soft: #edeff3;   /* 组合外   蓝灰 */
   /* 压在类别色块上的文字。⚠️ 不能写死白色 —— 深色模式下类别色整套提亮，
      白字压上去对比度掉到读不出来，得反过来用深色。 */
   --on-cat: #ffffff;
@@ -121,15 +130,15 @@
     /* ⚠️ 类别色**整套提亮**:白天那套压在 #1c1f25 上对比度不够,
        尤其是 5px 高的进度条,细线在暗底上更吃亏。
        soft 底色则反过来压暗 —— 白天的浅底在夜里会变成一块发光的板。 */
-    --cat-a: #7d9cf0;  --cat-a-soft: #1b2440;
-    --cat-b: #3fb9c7;  --cat-b-soft: #122e33;
-    --cat-c: #e0ad4f;  --cat-c-soft: #33280f;
-    --cat-d: #d081ad;  --cat-d-soft: #331d2a;
-    --cat-e: #5cbc86;  --cat-e-soft: #14301f;
-    --cat-f: #9ccb75;  --cat-f-soft: #1f2c15;
-    --cat-g: #99a1ad;  --cat-g-soft: #262a31;
+    --cat-a: #7ba3e0;  --cat-a-soft: #1a2334;
+    --cat-b: #a3c4ee;  --cat-b-soft: #1c2738;
+    --cat-d: #b096d4;  --cat-d-soft: #251e30;
+    --cat-c: #dcae5c;  --cat-c-soft: #2f2717;
+    --cat-e: #5fb391;  --cat-e-soft: #14291f;
+    --cat-f: #8ccbae;  --cat-f-soft: #182d24;
+    --cat-g: #a0a7b3;  --cat-g-soft: #262a31;
     --cat-h: #bf9a78;  --cat-h-soft: #2e2419;
-    --cat-i: #8e9dbb;  --cat-i-soft: #1e232e;
+    --cat-i: #9aa2b3;  --cat-i-soft: #1e2129;
     --on-cat: #16181d;
   }
 }

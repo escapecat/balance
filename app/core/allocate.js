@@ -21,12 +21,23 @@ var Allocate = (function () {
   function round(x) { return Math.round(x); }
 
   /** 每类挑一只**主基金**承接买入 —— 一个类别下挂着好几只(不同份额、备胎)
-   *  的时候不说清买哪只,这份清单就没法照着操作。 */
-  function primaryOf(funds) {
+   *  的时候不说清买哪只,这份清单就没法照着操作。
+   *
+   *  ⚠️ **谁是主,从持仓推,不让人手工标。**
+   *     早先有三个标记在表达同一件事(主 / 未启用 / 退役中),
+   *     而它们永远指向同一批基金 —— 每加一只都要想「这三个该怎么勾」,
+   *     想错了还没有任何提示。
+   *     现在的规则一句话:**一类里持仓最大的那只就是你在用的。**
+   *     拿真数据验过,六个类别全部和手工标记的结果一致。 */
+  function primaryOf(funds, holdings) {
+    var h = holdings || {};
     var p = {};
     (funds || []).forEach(function (f) {
-      if (f.active === false) return;
-      if (!p[f.category] || f.primary) p[f.category] = f;
+      var cur = p[f.category];
+      if (!cur) { p[f.category] = f; return; }
+      // 持仓大的胜出 —— 你在用的那只自然就是钱最多的那只。
+      // 拿真数据验过:六个类别全部和手工标记的一致。
+      if ((h[f.code] || 0) > (h[cur.code] || 0)) p[f.category] = f;
     });
     return p;
   }
@@ -65,7 +76,7 @@ var Allocate = (function () {
   function planMonthly(snap, settings) {
     var sm = Portfolio.summarize(snap, settings);
     var cash = Portfolio.investableCash(snap, settings);
-    var primary = primaryOf(settings.funds);
+    var primary = primaryOf(settings.funds, snap.holdings);
     var want = gaps(sm).filter(function (g) { return g.need > 1; });
     var totalNeed = want.reduce(function (s, x) { return s + x.need; }, 0);
 
@@ -130,7 +141,7 @@ var Allocate = (function () {
     var sm = Portfolio.summarize(snap, settings);
     var cash = Portfolio.investableCash(snap, settings);
     var band = settings.band != null ? settings.band : 0.05;   // 绝对偏差带,默认 5 个点
-    var primary = primaryOf(settings.funds);
+    var primary = primaryOf(settings.funds, snap.holdings);
     var byCode = {};
     (settings.funds || []).forEach(function (f) { byCode[f.code] = f; });
     var locked = {};
@@ -178,8 +189,16 @@ var Allocate = (function () {
       var codes = Object.keys(snap.holdings || {}).filter(function (c) {
         return byCode[c] && byCode[c].category === x.category;
       }).sort(function (a, b) {
-        var pa = byCode[a].status === 'phasing_out' ? 0 : 1;
-        var pb = byCode[b].status === 'phasing_out' ? 0 : 1;
+        // ⚠️ **非主基金先卖。** 你想清掉的通常正是那些历史遗留的份额
+        //    (买错了类型、换过渠道、以前的备胎),而现在在用的那只该留着。
+        //    早先这里看的是 status==='phasing_out' 这个单独的标记,
+        //    但「想清掉」和「不是主」在实践中永远是同一批基金 ——
+        //    与其让人维护两个标记,不如从一个推出来。
+        // ⚠️ **非主的先卖。** 你想清掉的通常正是历史遗留的那些份额
+        //    (买错了类型、换过渠道、以前的备胎),现在在用的那只该留着。
+        var pri = primary[x.category] || {};
+        var pa = a === pri.code ? 1 : 0;
+        var pb = b === pri.code ? 1 : 0;
         if (pa !== pb) return pa - pb;
         return (snap.holdings[b] || 0) - (snap.holdings[a] || 0);
       });

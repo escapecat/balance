@@ -10,7 +10,7 @@
 
 var SettingsUI = (function () {
 
-  var el, onChanged = null;
+  var el, onChanged = null, editing = null;
 
   function h(tag, attrs, kids) {
     var n = document.createElement(tag);
@@ -34,6 +34,9 @@ var SettingsUI = (function () {
 
   function render() {
     el.innerHTML = '';
+    // 编辑基金时**整屏接管** —— 和录入页同一个模式。
+    // 在长长的设置列表中间就地展开的话,滚动位置会跳,改完还得自己找回来。
+    if (editing) { el.appendChild(fundForm()); return; }
     var w = h('div', { class: 'wrap' });
     var s = st();
     var snaps = Store.get('snapshots', []) || [];
@@ -132,20 +135,38 @@ var SettingsUI = (function () {
     }, ['＋ 加一个类别']));
 
     // ---- 基金清单 ----
-    w.appendChild(h('h2', {}, ['基金 · ' + funds.length + ' 只']));
-    var fl = h('div', { class: 'list' });
+    //
+    // ⚠️ **清仓的沉到底部并标出来。** 卖光了的基金还留在清单里,
+    //    每次加新基金都要从它们中间划过去 —— 而它们已经不参与任何事了。
+    //    但也不自动删:今天清零明天买回来是常事,
+    //    自动改配置这件事本身会让人不安。点一下就能删。
+    var held = (snap || {}).holdings || {};
+    var live = [], empty = [];
     funds.forEach(function (f) {
-      var bits = [f.code, f.category];
-      if (f.dailyLimit) bits.push('日限额 ' + money(f.dailyLimit));
-      if (f.primary) bits.push('主');
-      if (f.active === false) bits.push('未启用');
-      if (f.status === 'phasing_out') bits.push('退役中');
+      ((held[f.code] > 0) ? live : empty).push(f);
+    });
+    // 持仓大的在前 —— 顺序和「谁是主基金」的规则一致,看着不会打架
+    live.sort(function (a, b) { return (held[b.code] || 0) - (held[a.code] || 0); });
+
+    // 每类持仓最大的那只 = 买入落点。**算出来的,不是标记出来的**
+    var mainOf = {};
+    live.forEach(function (f) { if (!mainOf[f.category]) mainOf[f.category] = f.code; });
+
+    w.appendChild(h('h2', {}, ['基金', h('span', { class: 'n' }, [live.length + ' 只'])]));
+    var fl = h('div', { class: 'list' });
+    live.forEach(function (f) {
       fl.appendChild(h('div', {
         class: 'list-row', onclick: function () { editFund(f, false); },
       }, [
         h('div', { class: 'body' }, [
           h('div', { class: 'ttl' }, [f.name || f.code]),
-          h('div', { class: 'sub2' }, [bits.join(' · ')]),
+          h('div', { class: 'sub2' }, [
+            f.code + ' · ' + f.category +
+            (mainOf[f.category] === f.code ? ' · 买入落这只' : ''),
+          ]),
+        ]),
+        h('div', { class: 'amt dim' }, [
+          h('span', { class: 'u' }, ['¥']), money(held[f.code]),
         ]),
         h('span', { class: 'chev' }),
       ]));
@@ -155,6 +176,27 @@ var SettingsUI = (function () {
       class: 'btn ghost', style: 'margin-top:8px',
       onclick: function () { editFund({}, true); },
     }, ['＋ 加一只基金']));
+
+    if (empty.length) {
+      w.appendChild(h('h2', {}, ['已清仓', h('span', { class: 'n' }, [empty.length + ' 只'])]));
+      w.appendChild(h('div', { class: 'hint', style: 'margin-bottom:8px' }, [
+        '持仓是 0 了。删掉之后**历史里的金额一分不动**,归类也留着 —— ' +
+        '那几期照样算得对。',
+      ]));
+      var el0 = h('div', { class: 'list' });
+      empty.forEach(function (f) {
+        el0.appendChild(h('div', {
+          class: 'list-row', onclick: function () { dropEmpty(f); },
+        }, [
+          h('div', { class: 'body' }, [
+            h('div', { class: 'ttl' }, [f.name || f.code]),
+            h('div', { class: 'sub2' }, [f.code + ' · ' + f.category + ' · 点一下删掉']),
+          ]),
+          h('span', { class: 'chev' }),
+        ]));
+      });
+      w.appendChild(el0);
+    }
 
     // ---- 现金 ----
     // ⚠️ 这两项**一起决定「留多少现金不投」**,取更严的那个。
@@ -385,151 +427,116 @@ var SettingsUI = (function () {
     });
   }
 
-  /** 加 / 改 / 删一只基金 —— 一个弹层问完,不做多步向导 */
+  /** 加 / 改一只基金 —— **一屏问完,不做多步菜单。**
+   *
+   *  ⚠️ 早先这里是个菜单:改名字点一次、改类别再点一次、改代码又一次。
+   *     要改三项就得进出三轮,而每轮之间还得重新找到这只基金。
+   *     录入页早就坚持「一屏滚完不做逐个问答」了,这里却做反了。
+   *
+   *  ⚠️ 字段**只剩三个**:代码 · 名字 · 类别。
+   *     日限额、未启用、退役中都砍了 —— 前者不再有约束,
+   *     后两者和「谁是主基金」说的是同一件事,而那件事现在从持仓自动推。
+   */
   function editFund(f, isNew) {
+    editing = { code: f.code || '', name: f.name || '', category: f.category || '',
+                _old: isNew ? null : f.code, isNew: !!isNew };
+    render();
+  }
+
+  function fundForm() {
     var s = st();
     var cats = Object.keys(s.targets || {});
-    Modal.pick({
-      title: isNew ? '加一只基金' : (f.name || f.code),
-      hint: isNew ? null : (f.code + ' · ' + (f.category || '未分类')),
-      options: [
-        { key: 'cat', label: '归到哪一类', hint: f.category || '还没归类' },
-        { key: 'name', label: '改名字', hint: f.name || '(没填)' },
-        { key: 'code', label: '改代码', hint: f.code || '(没填)' },
-        { key: 'limit', label: '日限额',
-          hint: f.dailyLimit ? money(f.dailyLimit) + '/日' : '无限额 —— 可以一次买完' },
-        { key: 'flags', label: '主基金 / 启用 / 退役',
-          hint: [f.primary ? '主' : '', f.active === false ? '未启用' : '启用中',
-                 f.status === 'phasing_out' ? '退役中' : ''].filter(Boolean).join(' · ') },
-      ].concat(isNew ? [] : [{ key: 'del', label: '删掉这只', danger: true,
-                              hint: '历史快照里的数字不动,只是不再参与再平衡' }]),
-    }).then(function (v) {
-      if (!v) return;
-      if (v === 'del') {
-        Modal.confirm({
-          title: '把 ' + (f.name || f.code) + ' 从清单里删掉?',
-          body: '历史快照里的金额**不会动**,只是它从此不参与再平衡,' +
-                '并且会显示成「未分类」。',
-          ok: '删掉', danger: true,
-        }).then(function (ok) { if (ok) { Config.removeFund(f.code); render(); } });
-        return;
-      }
-      if (v === 'cat') {
-        Modal.pick({
-          title: '归到哪一类', options: cats.map(function (c) { return { key: c, label: c }; }),
-        }).then(function (c) {
-          if (!c) return;
-          Config.upsertFund(Object.assign({}, f, { category: c }), isNew);
-          render();
-        });
-        return;
-      }
-      if (v === 'flags') { editFlags(f); return; }
-      var spec = {
-        name: { title: '叫什么名字', type: 'text', value: f.name },
-        code: { title: '基金代码', type: 'text', value: f.code },
-        limit: { title: '每日最多能买多少', type: 'number', suffix: '元',
-                 value: f.dailyLimit, allowEmpty: true, emptyLabel: '没有限额' },
-      }[v];
-      Modal.ask(spec).then(function (val) {
-        if (val == null) return;
-        var patch = {};
-        if (v === 'limit') patch.dailyLimit = val === '' ? null : parseFloat(val);
-        else patch[v] = val;
-        Config.upsertFund(Object.assign({}, f, patch), isNew);
-        render();
-      });
-    });
+    var w = h('div', { class: 'wrap' });
+    var d = editing;
+
+    w.appendChild(h('h1', {}, [d.isNew ? '加一只基金' : (d.name || d.code)]));
+
+    function textRow(label, key, hint, mode) {
+      var row = h('div', { class: 'list-row' }, [
+        h('div', { class: 'body' }, [
+          h('div', { class: 'ttl' }, [label]),
+          hint ? h('div', { class: 'sub2' }, [hint]) : '',
+        ].filter(function (x) { return x !== ''; })),
+      ]);
+      row.appendChild(h('input', {
+        type: 'text', inputmode: mode || 'text', value: d[key],
+        oninput: function (e) { d[key] = e.target.value; },
+        style: 'width:9em;text-align:right',
+      }));
+      return row;
+    }
+
+    w.appendChild(h('div', { class: 'list' }, [
+      textRow('基金代码', 'code', '六位数字', 'numeric'),
+      textRow('名字', 'name', '你自己认得出就行'),
+      h('div', {
+        class: 'list-row',
+        onclick: function () {
+          Modal.pick({
+            title: '归到哪一类',
+            hint: cats.length ? null : '还没有类别 —— 先在上面「目标比例」加一个',
+            options: cats.map(function (c) { return { key: c, label: c }; }),
+          }).then(function (c) { if (c) { d.category = c; render(); } });
+        },
+      }, [
+        h('div', { class: 'body' }, [
+          h('div', { class: 'ttl' }, ['类别']),
+          h('div', { class: 'sub2' }, ['决定它参与哪一档目标比例']),
+        ]),
+        h('div', { class: 'amt' }, [d.category || '还没选']),
+        h('span', { class: 'chev' }),
+      ]),
+    ]));
+
+    w.appendChild(h('button', {
+      class: 'btn', style: 'margin-top:16px', onclick: saveFund,
+    }, ['保存']));
+    w.appendChild(h('button', {
+      class: 'link', style: 'margin-top:8px',
+      onclick: function () { editing = null; render(); },
+    }, ['不改了']));
+
+    if (!d.isNew) {
+      w.appendChild(h('button', {
+        class: 'link danger', style: 'margin-top:16px',
+        onclick: function () { dropEmpty({ code: d._old, name: d.name, category: d.category }); },
+      }, ['从清单里删掉']));
+    }
+    return w;
   }
 
-  function editFlags(f) {
-    Modal.pick({
-      title: (f.name || f.code) + ' 的状态',
-      options: [
-        { key: 'primary', label: f.primary ? '取消「主基金」' : '设为主基金',
-          hint: '再平衡时买入落到主基金上' },
-        { key: 'active', label: f.active === false ? '启用' : '停用',
-          hint: '停用的不再买入,但持仓照样算进总额' },
-        { key: 'phasing', label: f.status === 'phasing_out' ? '取消「退役中」' : '标为退役中',
-          hint: '年度再平衡卖出时优先从它出货' },
-      ],
-    }).then(function (v) {
-      if (!v) return;
-      var patch = {};
-      if (v === 'primary') patch.primary = !f.primary;
-      if (v === 'active') patch.active = f.active === false;
-      if (v === 'phasing') patch.status = f.status === 'phasing_out' ? null : 'phasing_out';
-      Config.upsertFund(Object.assign({}, f, patch), false);
-      render();
-    });
+  function saveFund() {
+    var d = editing;
+    if (!/^\d{6}$/.test(String(d.code).trim())) {
+      Modal.note({ title: '代码不对', body: '基金代码是六位数字。' });
+      return;
+    }
+    if (!d.category) { Modal.note({ title: '还没选类别', body: '不归类的话它不参与再平衡。' }); return; }
+    var payload = { code: String(d.code).trim(), name: (d.name || '').trim() || d.code,
+                    category: d.category };
+    if (d._old && d._old !== payload.code) payload._oldCode = d._old;
+    var r = Config.upsertFund(payload, d.isNew);
+    if (!r.ok) { Modal.note({ title: '存不下来', body: r.why }); return; }
+    editing = null;
+    if (onChanged) onChanged();
+    render();
   }
 
-  /** 改「从哪天起买卖记全了」。选项就是各期对账日 —— 起点落在两次对账
-   *  中间是没意义的:一期要么整个算得出来,要么整个算不出来。 */
-  function editSince(cur) {
-    var snaps = Store.get('snapshots', []) || [];
-    var opts = snaps.slice().reverse().slice(0, 6).map(function (s) {
-      return { key: s.date, label: s.date + (s.date === cur ? '(现在)' : ''),
-               hint: s.date === cur ? '' : '这天之后的期数才算得出涨跌' };
-    });
-    Modal.pick({
-      title: '从哪天起,买卖都记全了?',
-      hint: '**往后挪**:某期漏记过买入,把它退回「分不出」比留个错数强。\n' +
-            '**往前挪**:补录了更早的买卖之后,让那几期也算得出来。',
-      options: opts,
-    }).then(function (d) {
-      if (!d || d === cur) return;
-      Actions.startFrom(d);
+  /** 删掉一只 —— 清仓的清理,或者加错了想撤。
+   *  ⚠️ 归类会留在 `retired` 里,所以**历史那几期照样算得对**。 */
+  function dropEmpty(f) {
+    Modal.confirm({
+      title: '把「' + (f.name || f.code) + '」从清单里删掉?',
+      body: '历史快照里的金额**一分不动**,归类也留着 —— 那几期照样算得对。' +
+            '只是它不再出现在清单和再平衡里。以后又买回来,加回去就行。',
+      ok: '删掉', danger: true,
+    }).then(function (ok) {
+      if (!ok) return;
+      Config.removeFund(f.code);
+      editing = null;
       if (onChanged) onChanged();
       render();
     });
-  }
-
-  /** 加 / 改 / 删一项组合外资产。传 null 表示新加。 */
-  function editAsset(a) {
-    if (!a) {
-      Modal.ask({ title: '加一项', hint: '比如「MSFT」「自住房」' }).then(function (name) {
-        if (!name) return;
-        pickKind(function (k) { Assets.upsert({ name: name, kind: k }); render(); });
-      });
-      return;
-    }
-    Modal.pick({
-      title: a.name,
-      hint: Labels.kind(a.kind) + ' · 金额在录入页填',
-      options: [
-        { key: 'name', label: '改名字', hint: a.name },
-        { key: 'kind', label: '算哪一类', hint: Labels.kind(a.kind) },
-        { key: 'del', label: '删掉这项', danger: true,
-          hint: '历史快照里的金额不动,只是不再出现在录入页' },
-      ],
-    }).then(function (v) {
-      if (!v) return;
-      if (v === 'name') {
-        Modal.ask({ title: '叫什么名字', type: 'text', value: a.name }).then(function (n) {
-          if (!n) return;
-          Assets.upsert(Object.assign({}, a, { name: n })); render();
-        });
-      } else if (v === 'kind') {
-        pickKind(function (k) { Assets.upsert(Object.assign({}, a, { kind: k })); render(); });
-      } else {
-        Modal.confirm({
-          title: '把「' + a.name + '」删掉?',
-          body: '历史快照里那几个金额**不会动** —— 和删基金一样,' +
-                '那是你当时真实看到的数。\n只是它不再出现在录入页和总额里。',
-          ok: '删掉', danger: true,
-        }).then(function (ok) { if (ok) { Assets.remove(a.id); render(); } });
-      }
-    });
-  }
-
-  function pickKind(cb) {
-    Modal.pick({
-      title: '算哪一类',
-      options: Object.keys(Labels.KIND).map(function (k) {
-        return { key: k, label: Labels.KIND[k] };
-      }),
-    }).then(function (k) { if (k) cb(k); });
   }
 
   // ---- 备份 ----
@@ -619,6 +626,7 @@ var SettingsUI = (function () {
   function mount(node, opts) {
     el = node;
     onChanged = (opts || {}).onChanged;
+    editing = null;
     render();
   }
 

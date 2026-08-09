@@ -134,22 +134,61 @@ def main(db_path, cfg_path, out_path):
         code = d.get('code')
         ext.append({'id': code, 'name': d.get('name') or code,
                     'kind': d.get('kind') or 'other'})
+        # ⚠️ 字段叫 **value_cny**,不是 value。
+        #    第一版读的是 `d.get('value')` —— 取到 None,于是 MSFT 的 23.1 万
+        #    静默变成「从来没填过金额」,而界面上还煞有介事地提示你去补。
+        #    **这正是迁移最典型的失败方式:不报错,只是少了一笔。**
+        #    所以下面用 `or` 兜两种列名,并且**取不到值就喊出来**。
+        def val(row):
+            for k in ('value_cny', 'value'):
+                try:
+                    if row[k] is not None:
+                        return row[k]
+                except (KeyError, IndexError):
+                    pass
+            return None
+
         rows = []
         try:
-            rows = list(con.execute(
-                'select date, value from external_holdings_history where code=? order by date',
-                (code,)))
+            for h in con.execute(
+                    'select * from external_holdings_history where code=? order by date',
+                    (code,)):
+                rows.append({'date': h['date'], 'value': val(h)})
         except Exception:
             pass
         # 当前值也算一条:旧库把「最新」和「历史」分开存,这里合并
-        if d.get('value') is not None and snaps:
-            rows.append({'date': snaps[-1]['date'], 'value': d['value']})
+        cur = val(e)
+        if cur is not None and snaps:
+            rows.append({'date': snaps[-1]['date'], 'value': cur})
+        if not rows:
+            print('')
+            print('  ⚠️  %s 一条金额都没读到 —— 是不是列名又变了?' % code)
+            decisions.append('%s 没有任何金额记录' % code)
         for h in rows:
+            if h['value'] is None:
+                orphan_ext.append('%s %s(值是空的)' % (code, h['date']))
+                continue
             snap = by_date.get(h['date'])
             if snap is None:
-                orphan_ext.append('%s %s' % (code, h['date']))   # 没有对应快照的,不硬塞
-                continue
+                # ⚠️ 没有同日快照的,**归到之后最近的那一期** ——
+                #    直接丢掉的话那笔钱人间蒸发,而总额少一块你只会以为是市场跌了。
+                later = [x for x in snaps if x['date'] >= h['date']]
+                if not later:
+                    orphan_ext.append('%s %s(比所有快照都晚)' % (code, h['date']))
+                    continue
+                snap = later[0]
             snap.setdefault('external', {})[code] = h['value']
+
+    # ⚠️ 组合外资产**逐期沿用最后已知值** —— 和录入页「留空 = 沿用上次」一致。
+    #    旧库只在你更新估值那天记一笔,不沿用的话就变成
+    #    「5 月有 23 万、6 月凭空消失、7 月又没有」——
+    #    而总额少一块,你只会以为是市场跌了。
+    last_ext = {}
+    for sn in snaps:
+        cur = dict(last_ext)
+        cur.update(sn.get('external') or {})
+        sn['external'] = cur
+        last_ext = cur
 
     if orphan_ext:
         print('')

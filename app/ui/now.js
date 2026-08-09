@@ -364,135 +364,66 @@ var NowUI = (function () {
     });
   }
 
-  /** 手动记一笔 —— 加仓、补仓、临时卖出、收到分红。
+  /** 手动记一笔 —— 加仓、补仓、临时卖出。
    *
-   *  ⚠️ 三步问完:什么动作 → 哪只 → 多少钱。不做表单页 ——
+   *  ⚠️ 三步问完:买还是卖 → 哪只 → 多少钱。**没有第四步。**
    *     这个操作发生在你刚在基金 app 里点完确认的那一刻,
    *     多一步都会让人想「回头再说」,而回头就忘了。
+   *
+   *  ⚠️ 早先这里还有「现金分红」和「记个决定」两个选项,砍了:
+   *     分红记成卖出数学上完全等价(见 core/actions.js 开头),
+   *     而纯留痕的选项只会让你每次都要跳过它。
+   *     日期一律记今天 —— 隔几天补记是少数情况,真需要时再加回来。
    */
   function recordOne() {
     // 记录的起点默认就是**最近一期对账日** —— 因为你的做法是「买了就录」,
     // 所以从上次对账起,记录天然是全的。不问,直接定。
-    //
-    // ⚠️ 唯一会出错的情况是「上次对账之后买过东西但没记」。
-    //    那种情况下这里会把那笔算成「市场涨跌」。
-    //    所以设置页里留了一行能改起点,而补录的入口就在下面那一屏 ——
-    //    两条后路都留着,但不拿一个问题挡在每个人前面。
     if (Actions.needsStart()) {
       var last = Ledger.latest(Store.get('snapshots', []) || []);
       Actions.startFrom(last ? last.date : today());
     }
-    doRecord();
-  }
-
-  /** @param backfillFrom 补录模式:给个日期下限,让人填当时的日期 */
-  function doRecord(backfillFrom) {
+    var st = Store.get('settings', {}) || {};
+    var funds = st.funds || [];
+    if (!funds.length) {
+      Modal.note({ title: '还没有基金清单', body: '先去设置里加一只。' });
+      return;
+    }
     Modal.pick({
       title: '记一笔',
       hint: '不记的话,这笔钱下次会被算成「市场涨跌」',
       options: [
         { key: 'buy', label: '买入', hint: '加仓 · 补仓 · 定投' },
-        { key: 'sell', label: '卖出', hint: '减仓 · 清仓 · 止盈' },
-        { key: 'dividend', label: '现金分红', hint: '钱从基金打到现金账户' },
-        { key: 'note', label: '记个决定', hint: '改了目标比例之类,不涉及钱' },
-        { key: 'back', label: '补录之前的一笔', hint: '日期填当时的' },
+        { key: 'sell', label: '卖出', hint: '减仓 · 清仓 · 止盈 · 收到分红也记这儿' },
       ],
     }).then(function (kind) {
       if (!kind) return;
-      // 补录走同一条流程,只是最后多问一次日期
-      if (kind === 'back') {
-        var last = Ledger.latest(Store.get('snapshots', []) || []);
-        doRecord(last ? last.date : '1970-01-01');
-        return;
-      }
-      if (kind === 'note') {
-        Modal.ask({ title: '记点什么', hint: '以后回看想知道当时在想什么' })
-          .then(function (txt) {
-            if (!txt) return;
-            Actions.add({ date: today(), kind: 'note', note: txt });
-            render();
-          });
-        return;
-      }
-      var st = Store.get('settings', {}) || {};
-      var funds = (st.funds || []).filter(function (f) { return f.active !== false; });
-      if (!funds.length) {
-        Modal.note({ title: '还没有基金清单', body: '先去设置里加一只。' });
-        return;
-      }
+      var snap = Ledger.latest(Store.get('snapshots', []) || []);
+      var held = (snap || {}).holdings || {};
+      // 持仓大的排前面 —— 你要记的多半就是在用的那只
+      var sorted = funds.slice().sort(function (a, b) {
+        return (held[b.code] || 0) - (held[a.code] || 0);
+      });
       Modal.pick({
-        title: '哪一只',
-        options: funds.map(function (f) {
-          return { key: f.code, label: f.name || f.code, hint: f.code + ' · ' + f.category };
+        title: kind === 'buy' ? '买的哪一只' : '卖的哪一只',
+        options: sorted.map(function (f) {
+          return { key: f.code, label: f.name || f.code,
+                   hint: f.category + (held[f.code] ? ' · 持有 ' + money(held[f.code]) : '') };
         }),
       }).then(function (code) {
         if (!code) return;
         var f = funds.filter(function (x) { return x.code === code; })[0];
         Modal.ask({
-          title: { buy: '买了多少', sell: '卖了多少', dividend: '分了多少' }[kind],
+          title: kind === 'buy' ? '买了多少' : '卖了多少',
           hint: (f.name || f.code) + ' · 填**实际成交**的金额,不是计划数',
           type: 'number', suffix: '元',
         }).then(function (v) {
           if (v == null || v === '') return;
-          var amount = parseFloat(v);
-          // ⚠️ 补录时**日期必须能改**。你不可能每次都在基金 app 点完确认的
-          //    那一刻就打开这里 —— 隔两天想起来是常态。
-          //    而日期错了,这笔就落到了错的那一期,两期的涨跌同时错。
-          if (backfillFrom) { askDate(backfillFrom, function (dt) { save(dt); }); }
-          else save(today());
-
-          function save(dt) {
-            var r = Actions.add({ date: dt, kind: kind, code: f.code,
-                                  category: f.category, amount: amount });
-            if (!r.ok) { Modal.note({ title: '记不下来', body: r.why }); return; }
-            if (backfillFrom) {
-              // 补录多半不止一笔 —— 存完直接问要不要再来一笔,
-              // 而不是退回首页让人重新点四层进来
-              Modal.pick({
-                title: '记好了',
-                hint: dt + ' · ' + (f.name || f.code) + ' ' + money(amount),
-                options: [{ key: 'more', label: '还有一笔要补' },
-                          { key: 'done', label: '补完了' }],
-              }).then(function (again) {
-                if (again === 'more') doRecord(backfillFrom); else render();
-              });
-              return;
-            }
-            render();
-          }
+          var r = Actions.add({ date: today(), kind: kind, code: f.code,
+                                category: f.category, amount: parseFloat(v) });
+          if (!r.ok) { Modal.note({ title: '记不下来', body: r.why }); return; }
+          render();
         });
       });
-    });
-  }
-
-  /** 哪天的这一笔。**只在补录时问** —— 平时记的都是刚做完的事,
-   *  多一步就多一次「回头再说」的机会,而回头就忘了。
-   *  @param from 下限:上次对账日。早于它的落在上一期,那期已经结账了 */
-  function askDate(from, then) {
-    Modal.ask({
-      title: '这笔是哪天的?',
-      hint: from + ' 之后的日期,格式 ' + today(),
-      value: today(),
-    }).then(function (v) {
-      if (!v) return;
-      var d = String(v).trim();
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || isNaN(Date.parse(d))) {
-        Modal.note({ title: '日期看不懂', body: '得是 ' + today() + ' 这种格式。' });
-        return;
-      }
-      // ⚠️ 早于上次对账的不收:那一期的数字已经定了,
-      //    往里塞一笔会让**已经看过的那期涨跌悄悄变掉**。
-      if (d <= from) {
-        Modal.note({ title: '这个日期太早了',
-                     body: from + ' 那一期已经对过账了,再往里加会让那期的涨跌变掉。\n' +
-                           '如果真需要,先去历史页删掉那一期再重录。' });
-        return;
-      }
-      if (d > today()) {
-        Modal.note({ title: '这是将来的日期', body: '记的应该是已经发生的事。' });
-        return;
-      }
-      then(d);
     });
   }
 

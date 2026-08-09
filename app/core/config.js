@@ -11,7 +11,7 @@
 var Config = (function () {
 
   var DEFAULTS = {
-    targets: {}, funds: [], locked: [],
+    targets: {}, funds: [], retired: [], locked: [],
     cashFloor: 0, cashTarget: 0.05, band: 0.05, minBuy: 1000,
   };
 
@@ -39,6 +39,9 @@ var Config = (function () {
 
     var i = list.findIndex(function (x) { return x.code === f.code; });
     if (isNew && i >= 0) return { ok: false, why: '代码 ' + f.code + ' 已经在清单里了' };
+    // 又买回来了 —— 从退役名单里捞出来,别留两份定义
+    var retired = (s.retired || []).filter(function (x) { return x.code !== f.code; });
+    if (retired.length !== (s.retired || []).length) save({ retired: retired });
 
     // 改代码的情况:老的那条要挪走,不能留下两条
     if (!isNew && f._oldCode && f._oldCode !== f.code) {
@@ -47,19 +50,40 @@ var Config = (function () {
       i = -1;
     }
     var clean = {};
-    ['code', 'name', 'category', 'dailyLimit', 'primary', 'active', 'status']
+    // ⚠️ 白名单**只有四个字段**。早先还有 dailyLimit / active / status,
+    //    但前者你不再受限额约束,后两者和 primary 说的是同一件事。
+    //    留着不用的字段比删掉更糟:每次加基金都要面对几个不知道干嘛的开关。
+    ['code', 'name', 'category', 'primary']
       .forEach(function (k) { if (f[k] !== undefined && f[k] !== null) clean[k] = f[k]; });
     if (i >= 0) list[i] = clean; else list.push(clean);
     save({ funds: list });
     return { ok: true };
   }
 
-  /** ⚠️ 只从清单里去掉,**历史快照一个字不动**。
-   *     那笔钱还在总额里,只是从此显示成「未分类」、不参与再平衡。
-   *     真去改历史的话,你就再也对不回当时基金 app 上看到的数了。 */
+  /** 从清单里去掉一只。**历史快照一个字不动。**
+   *
+   *  ⚠️ 但光「不动」还不够 —— 得**记住它原来归哪一类**。
+   *     工具是靠清单认代码的,直接删掉的话,历史那几期里的这笔钱
+   *     会变成「未分类」,于是设置页顶上反而多挂一条,
+   *     而那几期的类别汇总也跟着对不上。
+   *     所以删除 = 挪进 `retired`,清单上看不见了,历史照样归得了类。
+   *
+   *  ⚠️ 同一个代码以后又买回来的话,upsertFund 会把它从 retired 里捞出来 ——
+   *     否则你会看到「清单里有它、retired 里也有它」两份定义。 */
   function removeFund(code) {
     var s = get();
-    save({ funds: (s.funds || []).filter(function (f) { return f.code !== code; }) });
+    var f = (s.funds || []).filter(function (x) { return x.code === code; })[0];
+    var retired = (s.retired || []).filter(function (x) { return x.code !== code; });
+    if (f) retired.push({ code: f.code, name: f.name, category: f.category });
+    save({ funds: (s.funds || []).filter(function (x) { return x.code !== code; }),
+           retired: retired });
+  }
+
+  /** 清单 + 退役的,合起来给「历史怎么归类」用。
+   *  ⚠️ 现役的排在后面 —— 同代码时它覆盖退役的那份定义。 */
+  function allKnown(s) {
+    s = s || get();
+    return (s.retired || []).concat(s.funds || []);
   }
 
   function addCategory(name, ratio) {
@@ -89,7 +113,7 @@ var Config = (function () {
     return Object.keys(s.targets || {}).reduce(function (a, k) { return a + s.targets[k]; }, 0);
   }
 
-  return { DEFAULTS: DEFAULTS, get: get, save: save,
+  return { DEFAULTS: DEFAULTS, get: get, save: save, allKnown: allKnown,
            upsertFund: upsertFund, removeFund: removeFund,
            addCategory: addCategory, removeCategory: removeCategory,
            targetSum: targetSum };

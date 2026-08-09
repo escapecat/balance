@@ -80,4 +80,36 @@ if __name__ == '__main__':
     # ⚠️ 重定向到文件时 stdout 是块缓冲的,不 flush 的话上面这些**一个字都看不到**,
     #    而服务器已经在跑了 —— 表现成「运行了没反应」。
     sys.stdout.flush()
-    ThreadingHTTPServer(('0.0.0.0', PORT), H).serve_forever()
+    # ⚠️ 端口被占就**往上找一个空的**,别静默共用。
+    #
+    #    Windows 上 ThreadingHTTPServer 默认 allow_reuse_address = True,
+    #    于是两个进程能同时 LISTEN 同一个端口,bind **不报错**,
+    #    请求被先绑定的那个接走 —— 表现是「我明明起了服务器,
+    #    打开却是另一个项目的页面」,而且完全看不出发生了什么。
+    #    (刚踩过:菜谱工具的服务器还开着,Balance 起在同一个口上,
+    #     一直在看菜谱的页面纳闷为什么改动没生效。)
+    #
+    #    所以**靠连接探测**而不是靠 bind 报错:连得上就说明有人在服务了。
+    #    bind 探测在这里不管用,正是因为它不会失败。
+    def taken(p):
+        probe = socket.socket()
+        probe.settimeout(0.3)
+        try:
+            probe.connect(('127.0.0.1', p))
+            return True
+        except OSError:
+            return False
+        finally:
+            probe.close()
+
+    port = PORT
+    while port < PORT + 20 and taken(port):
+        port += 1
+    if port >= PORT + 20:
+        print('  %d~%d 全被占了,换个 PORT= 再试' % (PORT, port))
+        sys.exit(1)
+    if port != PORT:
+        print('  ⚠️ %d 上已经有别的服务了(多半是另一个项目),改用 %d:' % (PORT, port))
+        print('     http://%s:%d/' % (ip, port))
+        print('')
+    ThreadingHTTPServer(('0.0.0.0', port), H).serve_forever()

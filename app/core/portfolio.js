@@ -64,31 +64,94 @@ var Portfolio = (function () {
     return { total: total, invested: invested, cash: cash, rows: rows };
   }
 
+  /** 每个现金科目的角色和到账天数。
+   *
+   *  ⚠️ 三个现金科目**性质完全不同**,混成一个「现金」一视同仁是不对的:
+   *      现金账户  T+0,日常周转
+   *      日日宝    T+0,但那是刻意留着的备用金 —— 一分不该拿去买基金
+   *      月月宝    待投的钱池,**赎回要 2 天才到账**
+   *
+   *     没有这一层的话,工具会建议你「今天买 19 万」,而其中 15 万在月月宝里,
+   *     今天根本到不了账 —— 一份做不到的清单。
+   *
+   *  没配过就都当「可投 · 当天到账」,和以前一样。 */
+  function bucketOf(settings, key) {
+    var m = (settings || {}).cashBuckets || {};
+    var b = m[key] || {};
+    return { role: b.role === 'buffer' ? 'buffer' : 'investable',
+             settleDays: typeof b.settleDays === 'number' ? b.settleDays : 0 };
+  }
+
+  /** 标成「备用金」的那几个科目合计 —— 这部分永远不投。 */
+  function bufferCash(snap, settings) {
+    var c = snap.cash || {}, n = 0;
+    Object.keys(c).forEach(function (k) {
+      if (bucketOf(settings, k).role === 'buffer') n += c[k];
+    });
+    return n;
+  }
+
   /** 可以拿去买东西的钱。
    *
-   *  ⚠️ **要留下的现金 = max(绝对保底, 目标占比 × 总额)**,两个条件都得满足。
+   *  ⚠️ **要留下的现金 = 三个约束取最严**:
+   *       cashFloor        绝对下限,应急用的钱
+   *       cashTarget × 总额 比例目标,总额涨了备用金跟着涨
+   *       Σ备用金科目       你明确标成「不投」的那几个
    *
    *     第一版只减了 `cashFloor`,于是同一屏上出现两个打架的数:
    *     配置表(现金也是一个类别,目标 5%)说「现金超配 19 万」,
    *     而这里说「可投 29 万」—— 照后者做,现金会被抽到只剩保底那 1 万,
-   *     占比 0.5%,而你明明把现金目标设成了 5%。
+   *     而你明明把现金目标设成了 5%。
    *
-   *     两个设置是不同的东西,都得守:
-   *       cashFloor  —— 绝对下限。应急用的钱,跌到这个数以下不许再投
-   *       cashTarget —— 比例目标。现金作为一个类别,它也有自己的位置
-   *     总资产涨上去之后,后者会自动超过前者 —— 这正是「保持一定现金流」
-   *     该有的行为:钱多了,备用金也该跟着多。
+   *     三个都得守:只守绝对数的话资产涨上去备用金越来越薄;
+   *     只守比例的话刚起步时那点钱不够应急;
+   *     只守科目的话,你哪天忘了标记就一点保护都没有。
    */
   function investableCash(snap, settings) {
     var cash = sum(snap.cash || {});
     var total = sum(snap.holdings || {}) + cash;
     var floor = settings.cashFloor || 0;
     var byTarget = (settings.cashTarget != null ? settings.cashTarget : 0) * total;
-    return Math.max(0, cash - Math.max(floor, byTarget));
+    var byBucket = bufferCash(snap, settings);
+    return Math.max(0, cash - Math.max(floor, byTarget, byBucket));
+  }
+
+  /** 今天就能动的钱 —— 可投科目里**当天到账**的那部分。
+   *
+   *  ⚠️ 和 investableCash 是两个问题:
+   *      「该投多少」  → investableCash
+   *      「今天能投多少」→ 这个
+   *     月月宝赎回要 2 天,那笔钱该投,但今天到不了账。
+   *     不区分的话清单上会写「今天可以做完」,而你今天做不到。 */
+  function liquidNow(snap, settings) {
+    var c = snap.cash || {}, n = 0;
+    Object.keys(c).forEach(function (k) {
+      var b = bucketOf(settings, k);
+      if (b.role === 'investable' && b.settleDays === 0) n += c[k];
+    });
+    // 留下的那部分优先从「不投」的科目扣,扣不完的再从可投里扣
+    var keep = Math.max(0, Math.max(settings.cashFloor || 0,
+                                    (settings.cashTarget || 0) *
+                                      (sum(snap.holdings || {}) + sum(c)))
+                           - bufferCash(snap, settings));
+    return Math.max(0, n - keep);
+  }
+
+  /** 要等几天才到账的钱,按天数分组 —— 界面上要说清「先赎回,X 天后能买」。 */
+  function pending(snap, settings) {
+    var c = snap.cash || {}, out = [];
+    Object.keys(c).forEach(function (k) {
+      var b = bucketOf(settings, k);
+      if (b.role === 'investable' && b.settleDays > 0 && c[k] > 0) {
+        out.push({ key: k, amount: c[k], settleDays: b.settleDays });
+      }
+    });
+    return out.sort(function (a, b) { return a.settleDays - b.settleDays; });
   }
 
   return { byCategory: byCategory, sum: sum, summarize: summarize,
-           investableCash: investableCash };
+           investableCash: investableCash, bucketOf: bucketOf,
+           bufferCash: bufferCash, liquidNow: liquidNow, pending: pending };
 })();
 
 if (typeof module !== 'undefined') module.exports = Portfolio;

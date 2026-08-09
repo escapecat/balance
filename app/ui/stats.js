@@ -44,8 +44,56 @@ var StatsUI = (function () {
     return n;
   }
   function txt(t) { return document.createTextNode(t); }
-  /** 悬停提示。用 SVG 原生 <title> —— 零 JS、零依赖,手机上长按也出。 */
-  function tip(node, text) { node.appendChild(s('title', {}, [txt(text)])); return node; }
+
+  /** 一个图表容器 + 它自己的浮层。
+   *
+   *  ⚠️ 第一版用的是 SVG 原生 `<title>` —— 以为「零 JS 就有 tooltip」很划算,
+   *     实际上要把鼠标停住 1~2 秒才弹,样式是系统那套灰框,手机上只有长按才出。
+   *     **用起来等于没有。** 交互这种事没有便宜的近似:要么做,要么别声称有。
+   */
+  function chartBox() {
+    var box = h('div', { class: 'chart' });
+    var pop = h('div', { class: 'ctip' });
+    box.appendChild(pop);
+    return { box: box, pop: pop };
+  }
+
+  /** 给一个 svg 元素绑上浮层。
+   *  @param lines [[标题], [标签, 值], ...]
+   *
+   *  ⚠️ 触摸也要绑。手机上没有 hover,只绑 mouse 事件的话,
+   *     这些提示在手机上全是死的 —— 而这个 app 主要在手机上看。 */
+  function bindTip(node, ctx, lines, onEnter, onLeave) {
+    node.setAttribute('class', 'seg');
+    function place(e) {
+      var r = ctx.box.getBoundingClientRect();
+      var pt = e.touches && e.touches[0] ? e.touches[0] : e;
+      ctx.pop.style.left = Math.max(48, Math.min(r.width - 48, pt.clientX - r.left)) + 'px';
+      ctx.pop.style.top = (pt.clientY - r.top) + 'px';
+    }
+    function show(e) {
+      ctx.pop.innerHTML = '';
+      lines.forEach(function (l, i) {
+        var row = h('div', {});
+        if (l.length === 1) row.appendChild(h('b', {}, [l[0]]));
+        else {
+          row.appendChild(Dom.text(l[0] + ' '));
+          row.appendChild(h('b', { class: 'v' }, [l[1]]));
+        }
+        ctx.pop.appendChild(row);
+      });
+      ctx.pop.className = 'ctip on';
+      place(e);
+      if (onEnter) onEnter();
+    }
+    function hide() { ctx.pop.className = 'ctip'; if (onLeave) onLeave(); }
+    node.addEventListener('mouseenter', show);
+    node.addEventListener('mousemove', place);
+    node.addEventListener('mouseleave', hide);
+    node.addEventListener('touchstart', show);
+    node.addEventListener('touchend', hide);
+    return node;
+  }
 
   function money(n) {
     if (n == null || isNaN(n)) return '—';
@@ -197,9 +245,9 @@ var StatsUI = (function () {
     comp.forEach(function (c) {
       Object.keys(c.pct).forEach(function (k) { if (cats.indexOf(k) < 0) cats.push(k); });
     });
-    return cats.filter(function (c) { return c !== '现金' && c !== '未分类'; })
-               .concat(cats.filter(function (c) { return c === '未分类'; }))
-               .concat(cats.filter(function (c) { return c === '现金'; }));
+    var tail = ['未分类', '现金', '组合外'];
+    return cats.filter(function (c) { return tail.indexOf(c) < 0; })
+               .concat(tail.filter(function (c) { return cats.indexOf(c) >= 0; }));
   }
 
   /** 总资产折线。
@@ -215,6 +263,7 @@ var StatsUI = (function () {
     function X(i) { return padX + i * ((W - padX * 2) / Math.max(1, comp.length - 1)); }
     function Y(v) { return padY + (1 - (v - lo) / span) * (H - padY * 2); }
 
+    var ctx = chartBox();
     var svg = s('svg', { viewBox: '0 0 ' + W + ' ' + (H + 16), width: '100%',
                          role: 'img', 'aria-label': '总资产走势' });
     // 面积 + 线,面积让趋势更容易读
@@ -229,9 +278,16 @@ var StatsUI = (function () {
       'stroke-linejoin': 'round', 'stroke-linecap': 'round',
     }));
     comp.forEach(function (c, i) {
+      // 命中区比圆点大得多 —— 3.5px 的点在手机上根本点不中
+      var hit = s('circle', { cx: X(i), cy: Y(c.total), r: '14', fill: 'transparent' });
       var dot = s('circle', { cx: X(i), cy: Y(c.total), r: '3.5',
                               fill: 'var(--surface)', stroke: HUES[0], 'stroke-width': '2' });
-      svg.appendChild(tip(dot, c.date + '  ¥' + money(c.total)));
+      svg.appendChild(dot);
+      svg.appendChild(bindTip(hit, ctx, [
+        [c.date], ['总资产', '¥' + money(c.total)],
+        c.external ? ['其中组合外', '¥' + money(c.external)] : null,
+      ].filter(Boolean), function () { dot.setAttribute('r', '5.5'); },
+         function () { dot.setAttribute('r', '3.5'); }));
     });
     // 只标首尾的日期 —— 期数多了全标会糊成一片
     svg.appendChild(s('text', { x: X(0), y: H + 10, 'font-size': '9',
@@ -240,13 +296,15 @@ var StatsUI = (function () {
     svg.appendChild(s('text', { x: X(comp.length - 1), y: H + 10, 'text-anchor': 'end',
                                 'font-size': '9', fill: 'currentColor', opacity: '.55' },
                       [txt(md(comp[comp.length - 1].date))]));
-    return h('div', { class: 'chart' }, [svg]);
+    ctx.box.insertBefore(svg, ctx.pop);
+    return ctx.box;
   }
 
   /** 当前配置的环形图。
    *  ⚠️ 用环不用饼:中间那个洞可以放总额,而饼图的圆心什么也放不下。 */
   function donut(cur, cats) {
     var W = 320, R = 52, C = 2 * Math.PI * R, cx = W / 2, cy = 68;
+    var ctx = chartBox();
     var svg = s('svg', { viewBox: '0 0 ' + W + ' 140', width: '100%',
                          role: 'img', 'aria-label': '当前各类占比' });
     var off = 0;
@@ -260,7 +318,9 @@ var StatsUI = (function () {
         'stroke-dashoffset': -off * C,
         transform: 'rotate(-90 ' + cx + ' ' + cy + ')',
       });
-      svg.appendChild(tip(arc, c + '  ' + pct(p) + '  ¥' + money(cur.by[c])));
+      svg.appendChild(bindTip(arc, ctx, [
+        [c], ['占比', pct(p)], ['金额', '¥' + money(cur.by[c])],
+      ]));
       off += p;
     });
     svg.appendChild(s('text', {
@@ -270,8 +330,9 @@ var StatsUI = (function () {
     svg.appendChild(s('text', {
       x: cx, y: cy + 14, 'text-anchor': 'middle', 'font-size': '9',
       fill: 'currentColor', opacity: '.55',
-    }, [txt(md(cur.date) + ' 的组合')]));
-    return h('div', { class: 'chart' }, [svg]);
+    }, [txt(cur.external ? '组合 ' + money(cur.portfolio) + ' + 组合外' : md(cur.date))]));
+    ctx.box.insertBefore(svg, ctx.pop);
+    return ctx.box;
   }
 
   /** 堆叠柱 —— 每期一根,叠起来正好 100%。
@@ -285,6 +346,7 @@ var StatsUI = (function () {
     var W = 320, H = 150, pad = 8;
     var slot = (W - pad * 2) / comp.length;
     var bw = Math.min(38, slot - 4);
+    var ctx = chartBox();
     var svg = s('svg', { viewBox: '0 0 ' + W + ' ' + (H + 18), width: '100%',
                          role: 'img', 'aria-label': '各类占比随时间的变化' });
     comp.forEach(function (c, i) {
@@ -296,8 +358,9 @@ var StatsUI = (function () {
         var hgt = p * H;
         var rect = s('rect', { x: x, y: y, width: bw, height: hgt,
                                fill: HUES[j % HUES.length] });
-        svg.appendChild(tip(rect, c.date + '  ' + cat + '  ' + pct(p) +
-                                  '  ¥' + money(c.by[cat])));
+        svg.appendChild(bindTip(rect, ctx, [
+          [cat], [c.date, pct(p)], ['金额', '¥' + money(c.by[cat])],
+        ]));
         // 够高够宽才写字,否则挤成一团反而更难读
         if (hgt >= 16 && bw >= 26) {
           svg.appendChild(s('text', {
@@ -316,7 +379,8 @@ var StatsUI = (function () {
         }, [txt(md(c.date))]));
       }
     });
-    return h('div', { class: 'chart' }, [svg]);
+    ctx.box.insertBefore(svg, ctx.pop);
+    return ctx.box;
   }
 
   function rateRow(label, sub, rate, annual) {

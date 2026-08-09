@@ -28,6 +28,12 @@ El.prototype.appendChild = function (c) { c.parentNode = this; this.children.pus
 El.prototype.removeChild = function (c) {
   this.children = this.children.filter(function (x) { return x !== c; });
 };
+El.prototype.insertBefore = function (n, ref) {
+  var i = this.children.indexOf(ref);
+  n.parentNode = this;
+  if (i < 0) this.children.push(n); else this.children.splice(i, 0, n);
+  return n;
+};
 El.prototype.setAttribute = function (k, v) { this.attrs[k] = v; };
 El.prototype.getAttribute = function (k) { return this.attrs[k]; };
 El.prototype.addEventListener = function (k, f) { (this.handlers[k] = this.handlers[k] || []).push(f); };

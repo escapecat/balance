@@ -568,3 +568,39 @@ h2 .n { color: var(--text-dim2); font-weight: 500; margin-left: var(--s1);
 .empty { padding: var(--s6) var(--s4); }
 .empty .big { font-size: 30px; opacity: .35; margin-bottom: var(--s3); }
 .empty .hint { max-width: 26em; margin-left: auto; margin-right: auto; }
+
+/* ============================================================
+   图表交互
+   ============================================================
+   ⚠️ 第一版用的是 SVG 原生 <title> —— 以为「零 JS 就有 tooltip」很划算,
+      实际上要把鼠标停住 1~2 秒才弹,样式还是系统那套灰框,
+      手机上更是只有长按才出。**用起来等于没有。**
+      交互这种事没有「便宜的近似」:要么做,要么别声称有。 */
+
+.chart { position: relative; }
+
+/* 悬停时其余部分淡下去 —— 纯 CSS,不用 JS 逐个改属性 */
+.chart svg:hover .seg { opacity: .28; }
+.chart .seg { transition: opacity .15s var(--ease); cursor: pointer; }
+.chart svg .seg:hover { opacity: 1; }
+
+/* 跟随鼠标的浮层 */
+.ctip {
+  position: absolute; left: 0; top: 0; z-index: 3;
+  transform: translate(-50%, calc(-100% - 10px));
+  padding: 7px 10px; border-radius: var(--r-sm);
+  background: var(--text); color: var(--bg);
+  font-size: var(--t-xs); line-height: 1.45; white-space: nowrap;
+  box-shadow: var(--shadow-2);
+  opacity: 0; pointer-events: none;
+  transition: opacity .12s var(--ease);
+}
+.ctip.on { opacity: .96; }
+.ctip b { font-weight: 600; }
+.ctip .v { font-variant-numeric: tabular-nums; }
+/* 小尖角 */
+.ctip::after {
+  content: ''; position: absolute; left: 50%; bottom: -4px;
+  width: 8px; height: 8px; margin-left: -4px;
+  background: var(--text); transform: rotate(45deg);
+}

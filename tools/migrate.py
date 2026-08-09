@@ -204,7 +204,13 @@ def main(db_path, cfg_path, out_path):
             'funds': cfg['funds'],
             'locked': cfg['locked'],
             'cashFloor': cfg['cashFloor'],
-            'cashTarget': 0.05,
+            # ⚠️ **不编现金目标。** 旧库根本没有这个概念,
+            #    第一版这里硬编码 0.05,而 asset_targets 六类已经和为 100% ——
+            #    于是总目标变成 105%,缺口合计永远比钱多 5%,
+            #    表现是「现金填不满,还差 10 万」**永远填不满**,
+            #    而每一类的数字看着都合理,根本查不到问题在总和上。
+            #    没有的东西就是 0,现金靠 cash_floor 那个绝对下限守。
+            'cashTarget': 0,
             'band': 0.05,
             'minBuy': 1000,
             'unclassified': cfg.get('unclassified', []),

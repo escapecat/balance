@@ -132,8 +132,17 @@ var Stats = (function () {
     return { ok: true, rate: r, days: dayDiff(t0, cf[cf.length - 1].date) };
   }
 
-  /** 每一期各类占多少 —— 结构变化图用。
-   *  现金也是一类,而且常常是变化最大的那一类。 */
+  /** 每一期各类占多少 —— 走势图和结构图用。
+   *
+   *  ⚠️ **分母是总资产,含组合外。** 现金是一类,组合外(MSFT、房产)也是一类。
+   *     只画组合的话,标着「总资产走势」的图里少了一大块 ——
+   *     而首页顶上那个大数是含的,两处对不上你根本不知道差的哪儿。
+   *
+   *  ⚠️ 但**收益率仍然只按组合算**(见 twr / xirr 里的 total)。
+   *     组合外那部分是拍脑袋估的估值,一改就会让「市场赚了多少」凭空跳一下。
+   *     同一个页面上两种口径并存是对的 —— 它们回答的是不同的问题:
+   *       「我一共有多少 · 钱怎么分布」→ 总资产
+   *       「市场让我赚了多少」        → 组合 */
   function composition(snaps, settings) {
     var cats = Object.keys((settings || {}).targets || {});
     return (snaps || []).map(function (s) {
@@ -143,9 +152,11 @@ var Stats = (function () {
         var key = r.isCash ? '现金' : (r.unknown ? '未分类' : r.category);
         by[key] = (by[key] || 0) + r.value;
       });
-      var t = total(s);
-      return { date: s.date, total: t, by: by,
-               pct: cats.concat(['现金', '未分类']).reduce(function (m, c) {
+      var ext = Portfolio.sum(s.external || {});
+      if (ext > 0) by['组合外'] = ext;
+      var t = total(s) + ext;
+      return { date: s.date, total: t, portfolio: total(s), external: ext, by: by,
+               pct: cats.concat(['现金', '未分类', '组合外']).reduce(function (m, c) {
                  if (by[c] != null) m[c] = t ? by[c] / t : 0;
                  return m;
                }, {}) };

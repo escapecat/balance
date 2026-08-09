@@ -92,9 +92,14 @@ var SettingsUI = (function () {
 
     // ---- 目标比例 ----
     //
-    // ⚠️ **说清分母。** 百分比按「组合」算(持仓 + 现金),不含组合外资产 ——
-    //    首页顶上那个大数是「总资产」,两个数差着一个 MSFT,
-    //    不说的话你会拿 20% 去乘错的那个总额。
+    // ⚠️ **现金和其他类别列在一起,一起凑 100%。**
+    //    早先现金的目标是单独一个设置(在下面「现金」那一段),
+    //    于是六类 100% + 现金 5% = 105% —— 目标超发了,
+    //    表现是「现金填不满全部缺口,还差 10 万」**永远填不满**,
+    //    而每一类的数字看着都合理,根本查不出问题在总和上。
+    //
+    // ⚠️ 说清分母。首页顶上是**总资产**(含组合外),
+    //    而这些比例按**组合**算 —— 不说的话会拿 20% 去乘错的那个总额。
     w.appendChild(h('h2', {}, ['目标比例']));
     if (sm) {
       var extSum = Assets.total(snap).sum;
@@ -105,34 +110,52 @@ var SettingsUI = (function () {
     }
     var tl = h('div', { class: 'list' });
     var sum = 0;
-    Object.keys(s.targets || {}).forEach(function (c) {
-      sum += s.targets[c];
-      tl.appendChild(h('div', {
+    function targetRow(name, value, onSave) {
+      sum += value;
+      return h('div', {
         class: 'list-row',
         onclick: function () {
           Modal.ask({
-            title: c + ' 占多少?', hint: '填百分数,比如 20',
-            type: 'number', suffix: '%', value: Math.round(s.targets[c] * 1000) / 10,
+            title: name + ' 占多少?', hint: '填百分数,比如 20',
+            type: 'number', suffix: '%', value: Math.round(value * 1000) / 10,
           }).then(function (v) {
             if (v == null) return;
             var n = parseFloat(v);
             if (isNaN(n) || n < 0) return;
-            var t = Object.assign({}, s.targets); t[c] = n / 100;
-            save({ targets: t });
+            onSave(n / 100);
           });
         },
       }, [
-        h('div', { class: 'body' }, [h('div', { class: 'ttl' }, [c])]),
-        h('div', { class: 'amt' }, [(s.targets[c] * 100).toFixed(0) + '%']),
-      ]));
+        h('div', { class: 'body' }, [h('div', { class: 'ttl' }, [name])]),
+        h('div', { class: 'amt' }, [(value * 100).toFixed(0) + '%']),
+      ]);
+    }
+    Object.keys(s.targets || {}).forEach(function (c) {
+      tl.appendChild(targetRow(c, s.targets[c], function (v) {
+        var t = Object.assign({}, s.targets); t[c] = v;
+        save({ targets: t });
+      }));
     });
+    // 现金就在这儿,和别的类一样一行 —— 它本来就是一个类别
+    tl.appendChild(targetRow('现金', s.cashTarget || 0, function (v) {
+      save({ cashTarget: v });
+    }));
     w.appendChild(tl);
-    // ⚠️ 加起来不是 100% 要**当场说**。差几个点的话所有缺口都是错的,
-    //    而错的方式很隐蔽:每一类看着都合理,只是总也填不满。
+
+    // ⚠️ 加起来不是 100% 要**当场说清差多少、以及后果**。
+    //    差几个点的话所有缺口都是错的,而错法很隐蔽:
+    //    超发就是「永远填不满」,少发就是「早早说没事可做」。
     if (Math.abs(sum - 1) > 0.0001) {
+      var over = sum > 1;
+      var gapPct = Math.abs(sum - 1);
       w.appendChild(h('div', { class: 'note warn', style: 'margin-top:8px' }, [
-        '加起来是 **' + (sum * 100).toFixed(1) + '%**,不是 100% —— ' +
-        '这样算出来的缺口全是错的,而且每一类看着都合理。',
+        '加起来是 **' + (sum * 100).toFixed(1) + '%**,不是 100%。' +
+        (over
+          ? '目标超发了 ' + (gapPct * 100).toFixed(1) + ' 个点 —— ' +
+            '缺口合计会比你的钱多 ¥' + money(gapPct * (sm ? sm.total : 0)) +
+            ',表现是**永远填不满**。'
+          : '还有 ' + (gapPct * 100).toFixed(1) + ' 个点没分配 —— ' +
+            '那部分钱会一直闲着,而工具会说「各类都到位了」。'),
       ]));
     }
     w.appendChild(h('button', {
@@ -211,15 +234,13 @@ var SettingsUI = (function () {
     }
 
     // ---- 现金 ----
-    // ⚠️ 这两项**一起决定「留多少现金不投」**,取更严的那个。
-    //    分开写是因为它们管的是不同的事,而只守一个都会出问题:
-    //    只守绝对数 → 资产涨上去之后备用金相对越来越薄;
-    //    只守比例   → 刚起步时留的钱可能连一次应急都不够。
+    // ⚠️ 现金的**目标占比在上面「目标比例」里**(它是第七个类别)。
+    //    这儿只剩「绝对下限」和「偏差带」——
+    //    前者管的是「不管比例算出来多少,至少留这么多」,
+    //    资产还小的时候比例算出来那点钱不够应急。
     w.appendChild(h('h2', {}, ['现金']));
     w.appendChild(h('div', { class: 'list' }, [
       numItem('现金保底', '绝对下限。不管总额多少,至少留这么多', 'cashFloor', s.cashFloor, ''),
-      numItem('现金目标占比', '现金也是一个类别。总额涨了,备用金跟着涨',
-              'cashTarget', Math.round((s.cashTarget || 0) * 1000) / 10, '%'),
       numItem('偏差带', '偏差超过这么多个百分点,年度再平衡才动手',
               'band', Math.round((s.band || 0) * 1000) / 10, '%'),
     ]));

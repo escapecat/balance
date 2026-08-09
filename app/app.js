@@ -10,6 +10,12 @@
   var current = 'now';
   var entering = false;
 
+  // ⚠️ **开机第一件事:核对数据版本。** 在任何页面挂载之前。
+  //    挂完再检查就晚了 —— 页面一渲染就可能顺手写了存储
+  //    (比如「现在」页会把计划同步进待办),而那时候数据已经被
+  //    按错误的假设改过一遍了。
+  var booted = Store.boot();
+
   var TABS = [
     { id: 'now', label: '现在', icon: '◎' },
     { id: 'history', label: '历史', icon: '≡' },
@@ -43,6 +49,25 @@
 
   function render() {
     root.innerHTML = '';
+
+    // ⚠️ **数据版本对不上就到此为止,一个字节都不写。**
+    //    「尽力而为地跑」的后果是数据被新代码按错误的假设改写一遍,
+    //    而那时候连回滚点都被覆盖了。宁可这一屏什么都干不了。
+    if (booted && !booted.ok) {
+      var stop = h('div', { class: 'wrap' });
+      stop.appendChild(h('h1', {}, ['先别动']));
+      stop.appendChild(h('div', { class: 'note danger' }, [booted.why]));
+      stop.appendChild(h('div', { class: 'hint', style: 'margin-top:12px' }, [
+        '数据**没有被改动**。下面这个按钮只读不写,导出来存一份最保险。',
+      ]));
+      stop.appendChild(h('button', {
+        class: 'btn', style: 'margin-top:16px',
+        onclick: function () { SettingsUI.exportFile(); },
+      }, ['导出备份(只读)']));
+      root.appendChild(stop);
+      return;
+    }
+
     var page = h('div');
 
     // 录入是全屏接管 —— 抄数字的时候底下不该还挂着 tab 栏勾着你的注意力
@@ -68,6 +93,14 @@
   }
 
   render();
+
+  // 升级过就说一声 —— 静默升级和静默出错长得一模一样,
+  // 而你需要知道「今天这个数不对」和「昨天我升过级」有没有关系。
+  if (booted.ok && booted.migrated && booted.migrated.length) {
+    Modal.note({ title: '数据升级了',
+                 body: '结构从 ' + booted.migrated.join('、') +
+                       '。升级前那份存成了回滚点,设置页里能退回去。' });
+  }
 
   // 离线缓存 —— 只在 https / localhost 上装得起来,
   // 所以局域网 http 开发时它不会注册,改一行刷新就见效。

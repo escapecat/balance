@@ -122,7 +122,9 @@ var HistoryUI = (function () {
     snaps.slice().reverse().forEach(function (s, i, arr) {
       var prev = arr[i + 1];
       var d = Ledger.delta(s, prev);
-      var row = h('div', { class: 'list-row' }, [
+      var row = h('div', {
+        class: 'list-row', onclick: function () { tapSnapshot(s, d); },
+      }, [
         h('div', { class: 'body' }, [
           h('div', { class: 'ttl' }, [s.date + '　¥' + money(d.total)]),
           h('div', { class: 'sub2' }, [
@@ -183,6 +185,43 @@ var HistoryUI = (function () {
     }
 
     el.appendChild(w);
+  }
+
+  /** 点某一期 —— 目前只有「删掉」一个动作。
+   *
+   *  ⚠️ 不做「编辑这一期」。改历史看着方便,但它会让**过去的数字变成可疑的** ——
+   *     那些是你当时真实从基金 app 上抄下来的,改了就再也对不回去。
+   *     录错了就删掉重录一遍,一次两分钟,换来的是历史永远可信。
+   */
+  function tapSnapshot(s, d) {
+    Modal.pick({
+      title: s.date,
+      hint: '组合 ¥' + money(d.total) +
+            (d.market == null ? ' · 涨跌未知' : ' · 涨跌 ' + signed(d.market)),
+      options: [
+        { key: 'del', label: '删掉这一期', danger: true,
+          hint: '录错了就删掉重录 —— 这一页不提供「改」' },
+      ],
+    }).then(function (v) {
+      if (v !== 'del') return;
+      // ⚠️ 删掉一期会让**它之后那一期的涨跌重新算**(基准变了)。
+      //    不说的话你会发现别的月份数字也变了,而完全想不到是这一下删的。
+      var snaps = Store.get('snapshots', []) || [];
+      var i = snaps.findIndex(function (x) { return x.date === s.date; });
+      var next = i >= 0 && i < snaps.length - 1 ? snaps[i + 1].date : null;
+      Modal.confirm({
+        title: '删掉 ' + s.date + ' 这一期?',
+        body: (next ? '⚠️ ' + next + ' 那一期的涨跌会跟着重算 —— 基准变了。\n\n' : '') +
+              '删之前会自动存一个回滚点,设置页里能退回来。',
+        ok: '删掉', danger: true,
+      }).then(function (ok) {
+        if (!ok) return;
+        var r = Ledger.removeSnapshot(s.date);
+        if (!r.ok) { Modal.note({ title: '删不掉', body: r.why }); return; }
+        if (onChanged) onChanged();
+        render();
+      });
+    });
   }
 
   function reconsider(t) {

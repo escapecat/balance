@@ -130,6 +130,28 @@ var Ledger = (function () {
     return snap;
   }
 
+  /** 删掉某一期 —— 录错了、或者手滑存了个空的。
+   *
+   * ⚠️ **先留回滚点再删。** 删除是这个 app 里第二个不可撤销的写操作,
+   *    而且它比导入更容易误触:导入要选文件,删除只要点两下。
+   *
+   * ⚠️ 删掉一期会让**它之后那一期的「涨跌」重新算**(基准变了),
+   *    所以调用方要把这件事说出来 —— 不然你会发现别的月份的数字也变了,
+   *    而完全想不到是刚才那一下删的。 */
+  function removeSnapshot(date) {
+    var list = Store.get('snapshots', []) || [];
+    var i = list.findIndex(function (s) { return s.date === date; });
+    if (i < 0) return { ok: false, why: '没有 ' + date + ' 这一期' };
+    Store.saveRollback('删掉 ' + date + ' 之前');
+    var next = list.slice();
+    next.splice(i, 1);
+    Store.set('snapshots', next);
+    // 后面那一期的基准变了 —— 报出来让界面能说清
+    return { ok: true, removed: date,
+             affects: i < list.length - 1 ? list[i + 1].date : null,
+             left: next.length };
+  }
+
   /** 草稿 —— 手机上抄一半切走、被杀进程,回来能续。
    *
    * ⚠️ 存的是**原始输入字符串**,不是解析后的数字。
@@ -142,7 +164,8 @@ var Ledger = (function () {
 
   return { EMPTY: EMPTY, parse: parse, isEmpty: isEmpty,
            build: build, append: append, latest: latest, delta: delta,
-           commit: commit, saveDraft: saveDraft, loadDraft: loadDraft, dropDraft: dropDraft };
+           commit: commit, removeSnapshot: removeSnapshot,
+           saveDraft: saveDraft, loadDraft: loadDraft, dropDraft: dropDraft };
 })();
 
 if (typeof module !== 'undefined') module.exports = Ledger;

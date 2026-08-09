@@ -90,6 +90,18 @@ fs.readFileSync(path.join(APP, 'index.html'), 'utf8')
     return _;
   });
 
+// 有些界面分支只在特定状态下才出现(比如「退回上一个状态」只在真有回滚点时显示)。
+// 不给个开关的话,那些分支**从写完到上线一次都没被人看过**。
+//     node tools/view.js me +rollback
+if (process.argv.indexOf('+rollback') > 0) {
+  var cur0 = JSON.parse(mem[NS + 'snapshots'] || '[]');
+  mem[NS + '__rollback'] = JSON.stringify({
+    version: 1, reason: '导入备份之前', savedAt: '2026-08-09T10:30:00.000Z',
+    data: { snapshots: cur0.slice(0, Math.max(1, cur0.length - 1)),
+            settings: JSON.parse(mem[NS + 'settings'] || '{}') },
+  });
+}
+
 var page = process.argv[2] || 'now';
 var MOUNT = { now: 'NowUI', entry: 'EntryUI', me: 'SettingsUI',
               history: 'HistoryUI', stats: 'StatsUI' };

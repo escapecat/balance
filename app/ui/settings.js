@@ -205,6 +205,26 @@ var SettingsUI = (function () {
     w.appendChild(h('button', { class: 'btn ghost', style: 'margin-top:8px',
                                 onclick: importFile }, ['导入备份']));
 
+    // ---- 回滚点 ----
+    //
+    // ⚠️ 只在**真有**回滚点的时候才显示。平时挂一个「回到上一个状态」
+    //    但点了说「没有可回滚的」,那比不放还糟 ——
+    //    你会以为自己一直有条后路。
+    var rb = Store.getRollback();
+    if (rb) {
+      var rbChk = Store.inspectImport(rb);
+      w.appendChild(h('div', { class: 'hint', style: 'margin-top:16px' }, [
+        '上一个状态:**' + (rb.reason || '自动存的') + '**' +
+        (rb.savedAt ? ' · ' + rb.savedAt.slice(0, 16).replace('T', ' ') : '') +
+        (rbChk.ok ? '(' + rbChk.summary.snapshots + ' 期)' : '(坏了,用不了)'),
+      ]));
+      if (rbChk.ok) {
+        w.appendChild(h('button', {
+          class: 'btn ghost', style: 'margin-top:8px', onclick: doRollback,
+        }, ['退回上一个状态']));
+      }
+    }
+
     el.appendChild(w);
   }
 
@@ -369,8 +389,29 @@ var SettingsUI = (function () {
     setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
   }
 
-  function importFile() {
-    var inp = document.createElement('input');
+  /** 退回上一个状态。**当前状态会存成新的回滚点** ——
+   *  否则误点一下就再也回不来了,而这个按钮本来是用来救命的。 */
+  function doRollback() {
+    var rb = Store.getRollback();
+    var chk = Store.inspectImport(rb);
+    var cur = Store.exportAll().data;
+    Modal.confirm({
+      title: '退回到「' + (rb.reason || '上一个状态') + '」?',
+      body: '那份里:' + chk.summary.snapshots + ' 期(' +
+            (chk.summary.first || '?') + ' 到 ' + (chk.summary.last || '?') + ')\n' +
+            '现在这份:' + ((cur.snapshots || []).length) + ' 期\n\n' +
+            '现在这份会存成新的回滚点,所以退错了还能再退回来。',
+      ok: '退回去',
+    }).then(function (ok) {
+      if (!ok) return;
+      var r = Store.rollback();
+      if (!r.ok) { Modal.note({ title: '退不回去', body: r.why }); return; }
+      if (onChanged) onChanged();
+      render();
+    });
+  }
+
+  function importFile() {    var inp = document.createElement('input');
     inp.type = 'file';
     inp.accept = 'application/json,.json';
     inp.addEventListener('change', function () {
@@ -413,7 +454,7 @@ var SettingsUI = (function () {
     render();
   }
 
-  return { mount: mount };
+  return { mount: mount, exportFile: exportFile };
 })();
 
 if (typeof module !== 'undefined') module.exports = SettingsUI;

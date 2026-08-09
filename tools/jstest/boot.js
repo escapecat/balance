@@ -49,43 +49,60 @@ El.prototype.querySelector = function (sel) {
 // ⚠️ 前缀必须和 lib/store.js 里的一致。写错的话夹具全塞进了一个线上永远读不到
 //    的命名空间 —— 页面拿到的是空数据,而测试「有内容」的断言照样能过。
 //    这个坑在另一个项目里真发生过,整套页面测试空跑了一段时间。
-var mem = {}, NS = 'balance:';
-var body = new El('body'), appDiv = new El('div');
-appDiv.attrs.id = 'app'; body.appendChild(appDiv);
-var sandbox = {
-  document: {
-    body: body, documentElement: new El('html'), activeElement: null,
-    createElement: function (t) { return new El(t); },
-    createElementNS: function (ns, t) { return new El(t); },   // SVG 走这条
-    createTextNode: function (t) { var n = new El('#text'); n.text = t; return n; },
-    createDocumentFragment: function () { return new El('#frag'); },
-    getElementById: function (id) { return id === 'app' ? appDiv : null; },
-    querySelector: function (s) { return body.querySelector(s); },
-    addEventListener: function () {}, removeEventListener: function () {},
-  },
-  console: console, setTimeout: setTimeout, clearTimeout: clearTimeout,
-  Promise: Promise, Date: Date, Math: Math, JSON: JSON, Object: Object, Array: Array,
-  String: String, Number: Number, isNaN: isNaN, parseInt: parseInt, parseFloat: parseFloat,
-  RegExp: RegExp, Error: Error, encodeURIComponent: encodeURIComponent,
-  localStorage: {
-    getItem: function (k) { return mem[k] === undefined ? null : mem[k]; },
-    setItem: function (k, v) { mem[k] = String(v); },
-    removeItem: function (k) { delete mem[k]; },
-    key: function (i) { return Object.keys(mem)[i] || null; },
-    get length() { return Object.keys(mem).length; },
-  },
-  location: { reload: function () {} },
-};
-sandbox.window = sandbox; sandbox.globalThis = sandbox;
-// ⚠️ 这里**故意什么都不塞** —— 第一段测的就是「一条数据都没有」的状态,
-//    那是你第一次打开时看到的东西,也是最容易白屏的一条路。
+var NS = 'balance:';
 
-var ctx = vm.createContext(sandbox);
-fs.readFileSync(path.join(APP, 'index.html'), 'utf8')
-  .replace(/src="([^"]+\.js)"/g, function (_, f) {
-    vm.runInContext(fs.readFileSync(path.join(APP, f), 'utf8'), ctx, { filename: f });
-    return _;
+/** 造一个全新的运行环境,按 index.html 的真实顺序把所有脚本跑一遍。
+ *
+ *  ⚠️ 抽成函数是因为**开机路径不止一条**:空数据 / 有数据 / 数据版本对不上。
+ *     最后那条只有在重新开一次机的时候才走得到,而它恰恰是最危险的一条 ——
+ *     写错了的表现是用户打开 app 发现数据没了。 */
+function makeCtx(seed) {
+  var mem = {};
+  Object.keys(seed || {}).forEach(function (k) {
+    mem[NS + k] = typeof seed[k] === 'string' ? seed[k] : JSON.stringify(seed[k]);
   });
+  var body = new El('body'), appDiv = new El('div');
+  appDiv.attrs.id = 'app'; body.appendChild(appDiv);
+  var sandbox = {
+    document: {
+      body: body, documentElement: new El('html'), activeElement: null,
+      createElement: function (t) { return new El(t); },
+      createElementNS: function (ns, t) { return new El(t); },   // SVG 走这条
+      createTextNode: function (t) { var n = new El('#text'); n.text = t; return n; },
+      createDocumentFragment: function () { return new El('#frag'); },
+      getElementById: function (id) { return id === 'app' ? appDiv : null; },
+      querySelector: function (s) { return body.querySelector(s); },
+      addEventListener: function () {}, removeEventListener: function () {},
+    },
+    console: console, setTimeout: setTimeout, clearTimeout: clearTimeout,
+    Promise: Promise, Date: Date, Math: Math, JSON: JSON, Object: Object, Array: Array,
+    String: String, Number: Number, isNaN: isNaN, parseInt: parseInt, parseFloat: parseFloat,
+    RegExp: RegExp, Error: Error, encodeURIComponent: encodeURIComponent,
+    localStorage: {
+      getItem: function (k) { return mem[k] === undefined ? null : mem[k]; },
+      setItem: function (k, v) { mem[k] = String(v); },
+      removeItem: function (k) { delete mem[k]; },
+      key: function (i) { return Object.keys(mem)[i] || null; },
+      get length() { return Object.keys(mem).length; },
+    },
+    location: { reload: function () {} },
+  };
+  sandbox.window = sandbox; sandbox.globalThis = sandbox;
+  var c = vm.createContext(sandbox);
+  fs.readFileSync(path.join(APP, 'index.html'), 'utf8')
+    .replace(/src="([^"]+\.js)"/g, function (_, f) {
+      vm.runInContext(fs.readFileSync(path.join(APP, f), 'utf8'), c, { filename: f });
+      return _;
+    });
+  c.__app = appDiv;
+  c.__mem = mem;
+  return c;
+}
+
+// ⚠️ 第一段**故意什么都不塞** —— 测的是「一条数据都没有」的状态,
+//    那是你第一次打开时看到的东西,也是最容易白屏的一条路。
+var ctx = makeCtx();
+var appDiv = ctx.__app;
 
 var fail = 0;
 function ok(c, m) { if (!c) { console.log('  FAIL ' + m); fail++; } }
@@ -113,7 +130,7 @@ ok(/录第一期|还没有数据/.test(t0), '空状态没说清下一步该干�
 var real = JSON.parse(require('fs').readFileSync(
   require('path').join(process.env.TEMP || '/tmp', 'pf', 'backup-keep.json'), 'utf8'));
 Object.keys(real.data).forEach(function (k) {
-  mem[NS + k] = JSON.stringify(real.data[k]);
+  ctx.__mem[NS + k] = JSON.stringify(real.data[k]);
 });
 
 // ⚠️ **每加一页就要加进这个数组。** 漏了的话那一页挂了没人知道 ——
@@ -176,6 +193,32 @@ orphans.forEach(function (c) {
      '★ 设置页没显示未分类的 ' + c + ' —— 藏起来的话那笔钱永远不参与再平衡,' +
      '而你只会奇怪总额为什么对不上');
 });
+
+// ---- 5. ★ 数据版本对不上 → 停在一屏「先别动」,不许挂任何页面 ----
+//
+// 场景:另一台设备上跑着更新的代码写了数据,这台的 Service Worker 还缓存着旧代码。
+// 旧代码去读新数据是**静默算错**,所以正确反应是停下来。
+//
+// ⚠️ 这条只有**重新开一次机**才走得到,而它恰恰是最危险的一条 ——
+//    写错了的表现是「打开 app 发现数据没了」。
+var future = {};
+Object.keys(real.data).forEach(function (k) { future[k] = real.data[k]; });
+future.__meta = { schema: 999 };
+var ctx2 = makeCtx(future);
+var t2 = deep(ctx2.__app);
+
+ok(/先别动/.test(t2), '★ 版本对不上却照常挂了页面:' + t2.slice(0, 80));
+ok(/更新版本|刷新/.test(t2), '停止屏要说清怎么办:' + t2.slice(0, 120));
+ok(!/现在.*历史.*统计/.test(t2), '★ 停止屏上还挂着 tab 栏 —— 点一下就写数据了');
+
+// ★ 最要紧的一条:拦住的时候**一个字节都没写**
+var snapsAfter = JSON.parse(ctx2.__mem[NS + 'snapshots']);
+ok(snapsAfter.length === real.data.snapshots.length,
+   '★ 被拦住时数据被改动了(' + real.data.snapshots.length + ' → ' +
+   snapsAfter.length + ' 期)');
+ok(!ctx2.__mem[NS + 'todos'] ||
+   JSON.parse(ctx2.__mem[NS + 'todos']).length === (real.data.todos || []).length,
+   '★ 被拦住时待办被写了 —— 「现在」页渲染时会同步待办,说明它还是挂上了');
 
 console.log(fail ? '开机 ' + fail + ' 处不对'
                  : '  开机 ok(空数据不白屏 · 真实数据能挂 · 首屏算得出该买什么)');

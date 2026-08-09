@@ -187,6 +187,83 @@ var Modal = (function () {
     });
   }
 
+  /**
+   * 多字段表单 —— 一个弹窗里改完几样东西。
+   *
+   * @param o.fields [{key, label, hint, type:'text'|'number'|'select',
+   *                   options:[{key,label}], mode, placeholder}]
+   * @param o.values 初值
+   * @param o.validate(values) → null 表示通过,返回字符串表示错在哪
+   * @param o.extra  {label, danger, onClick(done)} 额外的一个按钮(比如「删掉」)
+   * @return Promise<values | null>
+   *
+   * ⚠️ **校验不通过时不关窗**,把错误显示在窗里。
+   *    早先基金编辑是整页表单,存不下来的时候先关掉表单再弹一个 note 说
+   *    「代码不对」—— 而那时候你填的东西已经看不见了,得重新进去找哪一格错了。
+   *
+   * ⚠️ 类别用原生 `<select>` 而不是再套一层 Modal.pick。
+   *    弹窗里弹弹窗要么盖掉下面那层、要么关掉时把外层一起关了；
+   *    而原生 select 在手机上本来就是系统选择器,比自己做的还好用。
+   */
+  function form(o) {
+    return open(function (box, done) {
+      head(box, o.title, o.hint);
+      var vals = {};
+      Object.keys(o.values || {}).forEach(function (k) { vals[k] = o.values[k]; });
+      var err = h('div', { class: 'note danger', style: 'display:none' });
+
+      (o.fields || []).forEach(function (f) {
+        var row = h('div', { style: 'margin-top:12px' });
+        row.appendChild(h('label', { class: 'lab' }, [
+          f.label,
+          f.hint ? h('span', { class: 'dim', style: 'font-weight:400' },
+                     ['  ' + f.hint]) : null,
+        ]));
+        var input;
+        if (f.type === 'select') {
+          input = h('select', {
+            onchange: function (e) { vals[f.key] = e.target.value; },
+          });
+          (f.options || []).forEach(function (op) {
+            var opt = h('option', { value: op.key }, [op.label]);
+            if (op.key === vals[f.key]) opt.setAttribute('selected', 'selected');
+            input.appendChild(opt);
+          });
+          // ⚠️ 没选过的时候 select 会自动显示第一项,而 vals 里还是空 ——
+          //    看着选好了,存下去却是空的。所以这里把默认值补上。
+          if (!vals[f.key] && (f.options || []).length) vals[f.key] = f.options[0].key;
+        } else {
+          input = h('input', {
+            type: f.type === 'number' ? 'number' : 'text',
+            inputmode: f.mode || (f.type === 'number' ? 'decimal' : null),
+            value: vals[f.key] == null ? '' : String(vals[f.key]),
+            placeholder: f.placeholder || '',
+            oninput: function (e) { vals[f.key] = e.target.value; },
+          });
+        }
+        row.appendChild(input);
+        box.appendChild(row);
+      });
+
+      box.appendChild(err);
+      box.appendChild(h('button', {
+        class: 'btn', style: 'margin-top:16px',
+        onclick: function () {
+          var why = o.validate ? o.validate(vals) : null;
+          if (why) { err.textContent = why; err.style.display = ''; return; }
+          done(vals);
+        },
+      }, [o.ok || '保存']));
+      if (o.extra) {
+        box.appendChild(h('button', {
+          class: 'link' + (o.extra.danger ? ' danger' : ''), style: 'margin-top:8px',
+          onclick: function () { o.extra.onClick(done); },
+        }, [o.extra.label]));
+      }
+      box.appendChild(cancelBtn(done));
+    });
+  }
+
   /** 确认 —— 返回 true / false */
   function confirm(o) {
     return open(function (box, done) {
@@ -211,7 +288,7 @@ var Modal = (function () {
     });
   }
 
-  return { pick: pick, ask: ask, confirm: confirm, note: note, close: close,
+  return { pick: pick, ask: ask, form: form, confirm: confirm, note: note, close: close,
            BACK: BACK };
 })();
 

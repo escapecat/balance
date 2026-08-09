@@ -10,7 +10,9 @@
 
 var SettingsUI = (function () {
 
-  var el, onChanged = null, editing = null;
+  var el, onChanged = null;
+  var sub = null;          // null | 'data' —— 二级屏
+
 
   function h(tag, attrs, kids) {
     var n = document.createElement(tag);
@@ -35,9 +37,7 @@ var SettingsUI = (function () {
 
   function render() {
     el.innerHTML = '';
-    // 编辑基金时**整屏接管** —— 和录入页同一个模式。
-    // 在长长的设置列表中间就地展开的话,滚动位置会跳,改完还得自己找回来。
-    if (editing) { el.appendChild(fundForm()); return; }
+    if (sub === 'data') { dataScreen(); return; }
     var w = h('div', { class: 'wrap' });
     var s = st();
     var snaps = Store.get('snapshots', []) || [];
@@ -291,37 +291,79 @@ var SettingsUI = (function () {
       onclick: function () { editAsset(null); },
     }, ['＋ 加一项']));
 
-    // ---- 买卖记录 ----
+    // ---- 数据与备份 ----
     //
-    // ⚠️ 平时不用管。放在这儿是因为**万一哪期算得不对,得有地方能改** ——
-    //    唯一会出错的情况是「某次对账之后买过东西但没记」,
+    // ⚠️ 版本号、导出导入、回滚点、买卖记录起点 —— 这四样**都是低频的**，
+    //    有的一年用一次，有的一次都不用。可它们原先各占一个板块摊在一级页上，
+    //    把设置页拖到九个板块长。
+    //    常用的（比例、基金、现金、组合外）被挤到需要滚动才看得全，
+    //    而那几个才是你真正会来改的。
+    //
+    //    所以低频的收进一个子屏。⚠️ **不是折叠**：折叠起来的东西
+    //    仍然占着一行标题和一次判断（「这个要不要点开」），
+    //    而这几样根本不该出现在你要改现金保底的时候。
+    w.appendChild(h('div', { class: 'list', style: 'margin-top:24px' }, [
+      h('div', { class: 'list-row', onclick: function () { sub = 'data'; render(); } }, [
+        h('div', { class: 'body' }, [
+          h('div', { class: 'ttl' }, ['数据与备份']),
+          h('div', { class: 'sub2' }, ['导出导入 · 回滚 · 版本号']),
+        ]),
+        h('span', { class: 'chev' }),
+      ]),
+    ]));
+
+    el.appendChild(w);
+  }
+
+  /** 二级屏:数据与备份。低频操作全在这儿。 */
+  function dataScreen() {
+    var w = h('div', { class: 'wrap' });
+    w.appendChild(h('h1', {}, ['数据与备份']));
+
+    w.appendChild(h('h2', {}, ['备份']));
+    w.appendChild(h('div', { class: 'hint', style: 'margin-bottom:8px' }, [
+      '数据只存在这台设备的浏览器里。**换手机、清缓存都会丢** —— 这是唯一的兜底。',
+    ]));
+    w.appendChild(h('button', { class: 'btn ghost', onclick: exportFile }, ['导出备份']));
+    w.appendChild(h('button', { class: 'btn ghost', style: 'margin-top:8px',
+                                onclick: importFile }, ['导入备份']));
+
+    // ⚠️ 只在**真有**回滚点的时候才显示。平时挂一个「回到上一个状态」
+    //    但点了说「没有可回滚的」,比不放还糟 —— 你会以为自己一直有条后路。
+    var rb = Store.getRollback();
+    if (rb) {
+      var rbChk = Store.inspectImport(rb);
+      w.appendChild(h('h2', {}, ['退回']));
+      w.appendChild(h('div', { class: 'hint' }, [
+        '上一个状态:**' + (rb.reason || '自动存的') + '**' +
+        (rb.savedAt ? ' · ' + rb.savedAt.slice(0, 16).replace('T', ' ') : '') +
+        (rbChk.ok ? '(' + rbChk.summary.snapshots + ' 期)' : '(坏了,用不了)'),
+      ]));
+      if (rbChk.ok) {
+        w.appendChild(h('button', {
+          class: 'btn ghost', style: 'margin-top:8px', onclick: doRollback,
+        }, ['退回上一个状态']));
+      }
+    }
+
+    // ⚠️ 平时不用管。唯一会用到的情况是「某次对账之后买过东西但没记」——
     //    那笔会被算成「市场涨跌」。把起点往后挪一期,那期就退回「分不出」,
     //    总比留着一个错的数强。
     var since = Actions.since();
     if (since) {
-      w.appendChild(h('h2', {}, ['买卖记录']));
+      w.appendChild(h('h2', {}, ['买卖记录起点']));
       w.appendChild(h('div', { class: 'list' }, [
-        h('div', {
-          class: 'list-row',
-          onclick: function () { editSince(since); },
-        }, [
+        h('div', { class: 'list-row', onclick: function () { editSince(since); } }, [
           h('div', { class: 'body' }, [
             h('div', { class: 'ttl' }, ['从 ' + since + ' 起记全了']),
-            h('div', { class: 'sub2' }, [
-              '这天之后的每一期都能算出涨跌 · 共 ' +
-              Actions.all().length + ' 笔记录',
-            ]),
+            h('div', { class: 'sub2' }, ['这天之后的每一期都能算出涨跌']),
           ]),
           h('span', { class: 'chev' }),
         ]),
       ]));
     }
 
-    // ---- 版本 ----
-    //
     // ⚠️ 「我改了你怎么还是老样子」这种事,不给版本号就只能靠猜。
-    //    显示构建时间(index.html 里的 <meta name="build">)——
-    //    你一眼就能知道手机上跑的是不是最新那版。
     var build = null;
     try {
       var m = document.querySelector('meta[name="build"]');
@@ -338,35 +380,10 @@ var SettingsUI = (function () {
       ]),
     ]));
 
-    // ---- 备份 ----
-    w.appendChild(h('h2', {}, ['备份']));
-    w.appendChild(h('div', { class: 'hint', style: 'margin-bottom:8px' }, [
-      '数据只存在这台设备的浏览器里。**换手机、清缓存都会丢** —— 这是唯一的兜底。',
-    ]));
-    w.appendChild(h('button', { class: 'btn ghost', onclick: exportFile }, ['导出备份']));
-    w.appendChild(h('button', { class: 'btn ghost', style: 'margin-top:8px',
-                                onclick: importFile }, ['导入备份']));
-
-    // ---- 回滚点 ----
-    //
-    // ⚠️ 只在**真有**回滚点的时候才显示。平时挂一个「回到上一个状态」
-    //    但点了说「没有可回滚的」,那比不放还糟 ——
-    //    你会以为自己一直有条后路。
-    var rb = Store.getRollback();
-    if (rb) {
-      var rbChk = Store.inspectImport(rb);
-      w.appendChild(h('div', { class: 'hint', style: 'margin-top:16px' }, [
-        '上一个状态:**' + (rb.reason || '自动存的') + '**' +
-        (rb.savedAt ? ' · ' + rb.savedAt.slice(0, 16).replace('T', ' ') : '') +
-        (rbChk.ok ? '(' + rbChk.summary.snapshots + ' 期)' : '(坏了,用不了)'),
-      ]));
-      if (rbChk.ok) {
-        w.appendChild(h('button', {
-          class: 'btn ghost', style: 'margin-top:8px', onclick: doRollback,
-        }, ['退回上一个状态']));
-      }
-    }
-
+    w.appendChild(h('button', {
+      class: 'btn', style: 'margin-top:24px',
+      onclick: function () { sub = null; render(); },
+    }, ['返回设置']));
     el.appendChild(w);
   }
 
@@ -477,90 +494,60 @@ var SettingsUI = (function () {
    *     日限额、未启用、退役中都砍了 —— 前者不再有约束,
    *     后两者和「谁是主基金」说的是同一件事,而那件事现在从持仓自动推。
    */
+  /** 改一只基金 —— **弹窗,不是整页**。
+   *
+   *  ⚠️ 早先是整屏接管的表单。三个字段而已,却要离开设置页、
+   *     改完再退回来,滚动位置还得自己找 —— 和旁边「目标比例」
+   *     点一行就地改完的体验完全是两套。
+   *     一个页面里两种交互模式,每次都得先想「这个是点开还是跳走」。
+   */
   function editFund(f, isNew) {
-    editing = { code: f.code || '', name: f.name || '', category: f.category || '',
-                _old: isNew ? null : f.code, isNew: !!isNew };
-    render();
-  }
-
-  function fundForm() {
     var s = st();
     var cats = Object.keys(s.targets || {});
-    var w = h('div', { class: 'wrap' });
-    var d = editing;
-
-    w.appendChild(h('h1', {}, [d.isNew ? '加一只基金' : (d.name || d.code)]));
-
-    function textRow(label, key, hint, mode) {
-      var row = h('div', { class: 'list-row' }, [
-        h('div', { class: 'body' }, [
-          h('div', { class: 'ttl' }, [label]),
-          hint ? h('div', { class: 'sub2' }, [hint]) : '',
-        ].filter(function (x) { return x !== ''; })),
-      ]);
-      row.appendChild(h('input', {
-        type: 'text', inputmode: mode || 'text', value: d[key],
-        oninput: function (e) { d[key] = e.target.value; },
-        style: 'width:9em;text-align:right',
-      }));
-      return row;
-    }
-
-    w.appendChild(h('div', { class: 'list' }, [
-      textRow('基金代码', 'code', '六位数字', 'numeric'),
-      textRow('名字', 'name', '你自己认得出就行'),
-      h('div', {
-        class: 'list-row',
-        onclick: function () {
-          Modal.pick({
-            title: '归到哪一类',
-            hint: cats.length ? null : '还没有类别 —— 先在上面「目标比例」加一个',
-            options: cats.map(function (c) { return { key: c, label: c }; }),
-          }).then(function (c) { if (c) { d.category = c; render(); } });
-        },
-      }, [
-        h('div', { class: 'body' }, [
-          h('div', { class: 'ttl' }, ['类别']),
-          h('div', { class: 'sub2' }, ['决定它参与哪一档目标比例']),
-        ]),
-        h('div', { class: 'amt' }, [d.category || '还没选']),
-        h('span', { class: 'chev' }),
-      ]),
-    ]));
-
-    w.appendChild(h('button', {
-      class: 'btn', style: 'margin-top:16px', onclick: saveFund,
-    }, ['保存']));
-    w.appendChild(h('button', {
-      class: 'link', style: 'margin-top:8px',
-      onclick: function () { editing = null; render(); },
-    }, ['不改了']));
-
-    if (!d.isNew) {
-      w.appendChild(h('button', {
-        class: 'link danger', style: 'margin-top:16px',
-        onclick: function () { dropEmpty({ code: d._old, name: d.name, category: d.category }); },
-      }, ['从清单里删掉']));
-    }
-    return w;
-  }
-
-  function saveFund() {
-    var d = editing;
-    if (!/^\d{6}$/.test(String(d.code).trim())) {
-      Modal.note({ title: '代码不对', body: '基金代码是六位数字。' });
+    if (!cats.length) {
+      Modal.note({ title: '还没有类别',
+                   body: '先在「目标比例」里加一个 —— 不归类的话它不参与再平衡。' });
       return;
     }
-    if (!d.category) { Modal.note({ title: '还没选类别', body: '不归类的话它不参与再平衡。' }); return; }
-    var payload = { code: String(d.code).trim(), name: (d.name || '').trim() || d.code,
-                    category: d.category };
-    if (d._old && d._old !== payload.code) payload._oldCode = d._old;
-    var r = Config.upsertFund(payload, d.isNew);
-    if (!r.ok) { Modal.note({ title: '存不下来', body: r.why }); return; }
-    editing = null;
-    if (onChanged) onChanged();
-    render();
+    var oldCode = isNew ? null : f.code;
+    Modal.form({
+      title: isNew ? '加一只基金' : (f.name || f.code),
+      fields: [
+        { key: 'code', label: '基金代码', hint: '六位数字', mode: 'numeric' },
+        { key: 'name', label: '名字', hint: '自己认得出就行' },
+        { key: 'category', label: '类别', hint: '决定它参与哪一档目标比例',
+          type: 'select', options: cats.map(function (c) { return { key: c, label: c }; }) },
+      ],
+      values: { code: f.code || '', name: f.name || '', category: f.category || '' },
+      validate: function (v) {
+        if (!/^\d{6}$/.test(String(v.code).trim())) return '基金代码是六位数字。';
+        if (!v.category) return '还没选类别 —— 不归类的话它不参与再平衡。';
+        return null;
+      },
+      // ⚠️ 删除入口跟着一起放进来。原先在整页表单底部,改成弹窗后
+      //    如果不带过来,清仓的基金就再也删不掉了。
+      extra: isNew ? null : {
+        label: '从清单里删掉', danger: true,
+        onClick: function (done) {
+          done(null);
+          dropEmpty({ code: oldCode, name: f.name, category: f.category });
+        },
+      },
+    }).then(function (v) {
+      if (!v) return;
+      var payload = { code: String(v.code).trim(),
+                      name: (v.name || '').trim() || String(v.code).trim(),
+                      category: v.category };
+      if (oldCode && oldCode !== payload.code) payload._oldCode = oldCode;
+      var r = Config.upsertFund(payload, !!isNew);
+      if (!r.ok) { Modal.note({ title: '存不下来', body: r.why }); return; }
+      if (onChanged) onChanged();
+      render();
+    });
   }
+
+  // ⚠️ fundForm() / saveFund() 已删 —— 那是整页表单那一版的东西。
+  //    留着的话下次会有人以为基金编辑还有两条路径。
 
   /** 删掉一只 —— 清仓的清理,或者加错了想撤。
    *  ⚠️ 归类会留在 `retired` 里,所以**历史那几期照样算得对**。 */
@@ -573,7 +560,6 @@ var SettingsUI = (function () {
     }).then(function (ok) {
       if (!ok) return;
       Config.removeFund(f.code);
-      editing = null;
       if (onChanged) onChanged();
       render();
     });
@@ -666,7 +652,7 @@ var SettingsUI = (function () {
   function mount(node, opts) {
     el = node;
     onChanged = (opts || {}).onChanged;
-    editing = null;
+    sub = null;      // 每次挂载都回一级页 —— 切走再切回来还停在子屏会莫名其妙
     render();
   }
 

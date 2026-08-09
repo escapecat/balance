@@ -191,39 +191,12 @@ var HistoryUI = (function () {
     collapsible('snaps', snapRows, sl);
     w.appendChild(sl);
 
-    // ---- 钱去哪了 ----
-    //
-    // ⚠️ 只统计**勾选申报过的**。2026-08 之前没有分类流水
-    //    (旧工具只记了建仓那一笔总的),所以这里明写从哪天开始有 ——
-    //    不许拿总额倒推补一段假的出来。
-    var net = Todos.netByCategory();
-    var cats = Object.keys(net).filter(function (c) { return Math.abs(net[c]) > 0; });
-    w.appendChild(h('h2', {}, ['钱去哪了']));
-    if (!cats.length) {
-      w.appendChild(h('div', { class: 'hint' }, [
-        '还没有分类流水。勾掉一条待办就会有第一条。',
-      ]));
-    } else {
-      var max = cats.reduce(function (m, c) { return Math.max(m, Math.abs(net[c])); }, 0);
-      var nl = h('div', { class: 'list' });
-      cats.sort(function (a, b) { return Math.abs(net[b]) - Math.abs(net[a]); })
-          .forEach(function (c) {
-        var b = h('div', { class: 'body' }, [h('div', { class: 'ttl' }, [c])]);
-        b.appendChild(h('div', { class: 'bar' }, [
-          h('i', { style: 'width:' + (max ? Math.abs(net[c]) / max * 100 : 0) + '%' }),
-        ]));
-        b.appendChild(h('div', { class: 'sub2' }, [
-          net[c] >= 0 ? '净投入 ¥' + money(net[c]) : '净取出 ¥' + money(-net[c]),
-        ]));
-        nl.appendChild(h('div', { class: 'list-row' }, [b]));
-      });
-      w.appendChild(nl);
-      var first = flows.reduce(function (m, f) { return !m || f.date < m ? f.date : m; }, null);
-      w.appendChild(h('div', { class: 'hint' }, [
-        '从 ' + first + ' 开始记的。**再早的没有分类流水** —— ' +
-        '旧工具只留了每期总额,倒推出来的会是假的。',
-      ]));
-    }
+    // ⚠️ 这里**没有「钱去哪了」那一段**,是删掉的。
+    //    它按类别汇总净投入,和上面「做过什么」同一份 flows[],
+    //    只是换了个聚合方式 —— 而这个工具一个月记几笔、一年二三十笔,
+    //    在这个量级上汇总几乎不产生新信息,两块看着就是同一件事排两遍。
+    //    真正有价值的汇总(投入 **和** 涨跌一起看)在统计页「各类贡献」:
+    //    光知道往黄金投了多少没用,得知道投进去之后它给了你什么。
 
     el.appendChild(w);
   }

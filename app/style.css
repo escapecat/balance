@@ -164,7 +164,26 @@ body {
   -webkit-tap-highlight-color: transparent;
 }
 
-.wrap { max-width: 560px; margin: 0 auto; padding: var(--s4); }
+/* ⚠️ **内容不满一屏时，最后一块列表要把剩下的空间吃掉。**
+   不这么做的话，卡片底色(--surface)结束的地方会露出更深的页面底色(--bg)，
+   那道色差看起来就是「页面到此为止，下面空了一块」——
+   而内容长的页面(比如设置)整屏都是卡片色，所以显得完整。
+   同一个 app 里两种观感，差别只来自内容多少，那不该由用户承担。
+   高度减掉 body 已经付过的那几笔(tab 栏 64px + 上下安全区)，否则重复扣减。 */
+.wrap {
+  max-width: 560px; margin: 0 auto; padding: var(--s4);
+  min-height: calc(100svh - 64px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  display: flex; flex-direction: column;
+}
+@supports not (height: 100svh) {
+  .wrap { min-height: calc(100vh - 64px); }
+}
+/* 只拉伸**最后一块内容容器**（app.js 渲染完盖上这个 class）——
+   中间的拉伸会把行距扯开，而拉伸按钮会拉出一个巨高的按钮。
+   ⚠️ 用 JS 标记而不是 `:last-child`：好几页的末尾是按钮或提示文字，
+      靠 CSS 选不中它前面那个列表。
+   `flex: 1 0 auto` 而不是 `1`：内容真的很长时不许被压缩。 */
+.fill-rest { flex: 1 0 auto; }
 
 h1 { font-size: var(--t-lg); font-weight: 650; margin: var(--s1) 0 var(--s1);
      letter-spacing: -.01em; }
@@ -702,13 +721,7 @@ h2 .n { color: var(--text-dim2); font-weight: 500; margin-left: var(--s1);
       哪个页面是空状态，渲染它的代码最清楚，不需要 CSS 去反推。
    ⚠️ 高度要减掉 body 已经付过的那几笔(tab 栏 64px + 上下安全区)，
       否则会重复扣减，内容区反而比可视区还矮，底下照样空一截。 */
-.wrap-fill {
-  min-height: calc(100svh - 64px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
-  display: flex; flex-direction: column;
-}
-@supports not (height: 100svh) {
-  .wrap-fill { min-height: calc(100vh - 64px); }
-}
+/* .wrap 现在本来就撑满 + flex 竖排，这里只管空状态那一块居中 */
 .wrap-fill > .empty {
   flex: 1;
   display: flex; flex-direction: column;

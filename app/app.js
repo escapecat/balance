@@ -97,8 +97,36 @@
     } else {
       NowUI.mount(page, { onEntry: function () { entering = true; render(); } });
     }
+    fillRest(page);
     root.appendChild(page);
     root.appendChild(tabbar());
+  }
+
+  /** 把页面最后一块内容容器拉长，占掉 tab 栏以上剩下的空间。
+   *
+   *  ⚠️ 为什么需要：卡片底色(--surface)和页面底色(--bg)不一样，
+   *     内容不满一屏时那道色差看起来就是「页面到此为止，下面空了一块」。
+   *     而内容长的页面(设置)整屏都是卡片色，所以显得完整 ——
+   *     同一个 app 里两种观感，差别只来自内容多少。
+   *
+   *  ⚠️ 为什么在这儿做而不是用 CSS `:last-child`：
+   *     好几页的末尾是按钮或提示文字，CSS 选不中它前面那个列表；
+   *     而直接拉伸最后一个元素的话，会拉出一个巨高的按钮。
+   *
+   *  ⚠️ 空状态那一屏不动 —— 它自己会居中(.wrap-fill)，
+   *     再拉伸一次会把居中顶掉。
+   */
+  function fillRest(page) {
+    var wrap = page.querySelector && page.querySelector('.wrap');
+    if (!wrap || (wrap.className || '').indexOf('wrap-fill') >= 0) return;
+    var kids = wrap.children || [];
+    for (var i = kids.length - 1; i >= 0; i--) {
+      var c = (kids[i].className || '');
+      if (c.indexOf('list') >= 0 || c.indexOf('card') >= 0 || c.indexOf('chart') >= 0) {
+        kids[i].className = c + ' fill-rest';
+        return;
+      }
+    }
   }
 
   render();

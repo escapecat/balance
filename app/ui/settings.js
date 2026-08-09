@@ -130,15 +130,42 @@ var SettingsUI = (function () {
         h('div', { class: 'amt' }, [(value * 100).toFixed(0) + '%']),
       ]);
     }
+    // ⚠️ **超过 100% 直接拒绝,不足 100% 只警告。**
+    //    这两个不对称,是有理由的:
+    //      超发 → 缺口合计比你的钱还多,表现是**永远填不满**,而且
+    //             每一类看着都合理,根本查不出问题出在总和上。没有任何
+    //             一种情况下你会想要它,所以硬拦。
+    //      不足 → 是合法的中间状态。把标普从 20 降到 10、再把黄金从 10 升到 20,
+    //             中间必然经过 90% —— 严格锁死 100% 的话这个编辑做不下去。
+    //             而且「留一部分不分配」本身也可能是你想要的。
+    function saveTargets(nextTargets, nextCash) {
+      var t = nextTargets || s.targets || {};
+      var cash = nextCash != null ? nextCash : (s.cashTarget || 0);
+      var total = cash;
+      Object.keys(t).forEach(function (k) { total += t[k]; });
+      if (total > 1.0001) {
+        var over = (total - 1) * 100;
+        Modal.note({
+          title: '加起来超过 100% 了',
+          body: '会超 **' + over.toFixed(1) + ' 个点**。' +
+                '目标超发的后果是缺口合计比你的钱还多 —— ' +
+                '清单上永远填不满,而每一类看着都正常。',
+        });
+        return false;
+      }
+      save(nextCash != null ? { targets: t, cashTarget: cash } : { targets: t });
+      return true;
+    }
+
     Object.keys(s.targets || {}).forEach(function (c) {
       tl.appendChild(targetRow(c, s.targets[c], function (v) {
         var t = Object.assign({}, s.targets); t[c] = v;
-        save({ targets: t });
+        saveTargets(t, null);
       }));
     });
     // 现金就在这儿,和别的类一样一行 —— 它本来就是一个类别
     tl.appendChild(targetRow('现金', s.cashTarget || 0, function (v) {
-      save({ cashTarget: v });
+      saveTargets(null, v);
     }));
     w.appendChild(tl);
 
@@ -157,6 +184,30 @@ var SettingsUI = (function () {
           : '还有 ' + (gapPct * 100).toFixed(1) + ' 个点没分配 —— ' +
             '那部分钱会一直闲着,而工具会说「各类都到位了」。'),
       ]));
+      // 不足的时候给一条出路 —— 光说「差 5 个点」而不给按钮,
+      // 你得自己算该给谁加多少,而那正是最容易再算错一次的地方。
+      if (!over) {
+        w.appendChild(h('button', {
+          class: 'btn ghost', style: 'margin-top:8px',
+          onclick: function () {
+            var cats = Object.keys(s.targets || {}).concat(['现金']);
+            Modal.pick({
+              title: '把剩下的 ' + (gapPct * 100).toFixed(1) + ' 个点给谁?',
+              options: cats.map(function (c) {
+                var cur = c === '现金' ? (s.cashTarget || 0) : s.targets[c];
+                return { key: c, label: c,
+                         hint: (cur * 100).toFixed(0) + '% → ' +
+                               ((cur + gapPct) * 100).toFixed(1) + '%' };
+              }),
+            }).then(function (c) {
+              if (!c) return;
+              if (c === '现金') { saveTargets(null, (s.cashTarget || 0) + gapPct); return; }
+              var t = Object.assign({}, s.targets); t[c] = t[c] + gapPct;
+              saveTargets(t, null);
+            });
+          },
+        }, ['把剩下的 ' + (gapPct * 100).toFixed(1) + ' 个点分配掉']));
+      }
     }
     w.appendChild(h('button', {
       class: 'btn ghost', style: 'margin-top:8px',
@@ -756,6 +807,73 @@ var SettingsUI = (function () {
 
   // ⚠️ fundForm() / saveFund() 已删 —— 那是整页表单那一版的东西。
   //    留着的话下次会有人以为基金编辑还有两条路径。
+
+  /** 改一项组合外资产(MSFT、房产…)—— 名字和类别。
+   *
+   *  ⚠️ 这个函数**以前根本不存在**,而设置页里两处 onclick 都在调它:
+   *     点 MSFT 那一行直接抛 ReferenceError,表现是「点了没反应」——
+   *     不报错、不闪烁,就是死的。
+   *     调用写了、实现没写,而 JS 不会在加载时告诉你这件事。
+   *
+   *  ⚠️ 这里**只改名目,不改金额**。金额在录入页填,和基金持仓走同一条路 ——
+   *     同一期的数字待在同一条快照里,才对得上账。
+   *     在这儿改金额的话,改的是哪一期?改完历史还对不对?两个问题都没有好答案。
+   *
+   *  @param a  null = 新加一项
+   */
+  function editAsset(a) {
+    var isNew = !a;
+    Modal.form({
+      title: isNew ? '加一项组合外资产' : a.name,
+      hint: '不参与再平衡,但算进总资产。**金额在录入页填**。',
+      fields: [
+        { key: 'name', label: '名字', hint: '比如 MSFT、自住房' },
+        { key: 'kind', label: '算哪一类', type: 'select',
+          options: Object.keys(Labels.KIND).map(function (k) {
+            return { key: k, label: Labels.KIND[k] };
+          }) },
+      ],
+      values: { name: (a && a.name) || '', kind: (a && a.kind) || 'stock' },
+      validate: function (v) {
+        if (!String(v.name || '').trim()) return '得有个名字。';
+        return null;
+      },
+      extra: isNew ? null : {
+        label: '删掉这一项', danger: true,
+        onClick: function (done) { done(null); dropAsset(a); },
+      },
+    }).then(function (v) {
+      if (!v) return;
+      var r = Assets.upsert({ id: a ? a.id : null,
+                              name: String(v.name).trim(), kind: v.kind });
+      if (!r.ok) { Modal.note({ title: '存不下来', body: r.why }); return; }
+      if (onChanged) onChanged();
+      render();
+    });
+  }
+
+  /** 删一项组合外资产。
+   *  ⚠️ 历史快照里那几个金额**一个字不动** —— 那是你当时真实看到的数。
+   *     代价是它会变成一条没人认领的 external 金额,所以要说清楚。 */
+  function dropAsset(a) {
+    var snaps = Store.get('snapshots', []) || [];
+    var had = snaps.filter(function (s0) {
+      return s0.external && s0.external[a.id] != null;
+    }).length;
+    Modal.confirm({
+      title: '把「' + a.name + '」删掉?',
+      body: had
+        ? '有 ' + had + ' 期记过它的金额。**那些数字一个字不动** —— ' +
+          '但它们会变成没人认领的一笔,历史里的总资产照旧,只是不再显示名字。'
+        : '还没记过金额,删了什么也不影响。',
+      ok: '删掉', danger: true,
+    }).then(function (yes) {
+      if (!yes) return;
+      Assets.remove(a.id);
+      if (onChanged) onChanged();
+      render();
+    });
+  }
 
   /** 删掉一只 —— 清仓的清理,或者加错了想撤。
    *  ⚠️ 归类会留在 `retired` 里,所以**历史那几期照样算得对**。 */

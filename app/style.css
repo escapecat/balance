@@ -47,16 +47,18 @@
      数字对不上是因为 64 从一开始就是拍脑袋估的,从没和真实高度核对过。 */
   --tabbar-h: 53px;
 
-  /* ⚠️ 页面底色**故意贴近卡片底色**。
-     两者差得明显的话,内容不满一屏时卡片结束的地方会出现一道色差,
-     看起来就是「页面到此为止,下面空了一块」—— 而这在高屏幕的手机上
-     被放大得很厉害(19.5:9,几行内容只占三分之一)。
-     层次靠 border 和阴影给,不靠底色对比给。 */
-  --bg:        #fafbfc;
+  /* ⚠️ **页面底色和卡片底色是同一个值。**
+     只要两者有色差,内容不满一屏时就会在卡片结束的地方留下一条可见的边,
+     而那条边会出现在各种意想不到的位置:内容区和 tab 栏之间、
+     tab 栏和屏幕底之间、列表的圆角旁边。我一条一条堵过,堵掉一条
+     还有下一条 —— 因为**色差本身才是原因,缝只是它显形的地方**。
+     统一之后,不管哪里露出背景都看不出断层。
+     层次改由 border 和阴影提供,不靠底色对比提供。 */
+  --bg:        #ffffff;
   --surface:   #ffffff;
-  --surface-2: #eef0f4;
+  --surface-2: #f1f3f6;
   --surface-3: #e4e7ec;
-  --border:    #e2e5ea;
+  --border:    #dcdfe6;
   --border-2:  #cfd4dc;
   --text:      #16181d;
   --text-dim:  #656c78;
@@ -112,11 +114,11 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg:        #191c22;
+    --bg:        #1c1f25;
     --surface:   #1c1f25;
     --surface-2: #262a31;
     --surface-3: #31363f;
-    --border:    #2e333b;
+    --border:    #333942;
     --border-2:  #3d434d;
     --text:      #e9ebef;
     --text-dim:  #9aa1ac;
@@ -158,6 +160,23 @@
 }
 
 * { box-sizing: border-box; }
+
+/* ⚠️ **底部安全区那一条,颜色不归 tab 栏管,归画布管。**
+ *
+ *  `window.innerHeight` 在全屏模式下不含底部安全区,所以 tab 栏
+ *  `bottom: 0` 只贴到 innerHeight —— 量出来「离屏幕底还剩 0px」,
+ *  可屏幕实际还往下多 34px。那 34px 画的是**画布背景**。
+ *
+ *  画布背景默认来自 body(--bg,深色),而 tab 栏是 --surface(浅) ——
+ *  于是 tab 栏那排字下面就出现一条深色带,看起来像 tab 栏没贴到底。
+ *
+ *  给 html 显式设背景,body 的背景就不再往画布传播:
+ *  body 盒子里仍是 --bg,而盒子之外(也就是安全区那一条)是 --surface,
+ *  和 tab 栏同色,缝就看不见了。
+ *
+ *  ⚠️ 这一条**不能靠 tab 栏自己的 padding / box-shadow 解决** ——
+ *     我前面试了两种,都是在给一块不属于它的区域上色。 */
+html { background: var(--surface); }
 
 body {
   margin: 0;

@@ -304,18 +304,16 @@ var Sync = (function () {
     });
   }
 
-  /** 数据变了 —— 打个记号,并**安排一次自动推送**(防抖 4 秒)。
+  /** 数据变了 —— **只打个记号,不推。**
    *
-   *  ⚠️ 不立刻推:一次录入会连着写好几个 key(snapshots / todos / flows),
-   *     每个都推一次就是七八个 commit,而且它们互相竞争 sha,
-   *     后面几个必然 409 —— 表现是「同步老是失败」。
+   *  ⚠️ 早先这里会防抖 4 秒后自动推。去掉了,理由是**推送这件事需要你在场**:
+   *      · 它会写另一台设备也在读的那份文件,冲突了要人来判断;
+   *      · 失败时(断网、token 过期)如果弹窗会打断手上的事,
+   *        不弹窗又等于失败被吞掉 —— 两条路都不好;
+   *      · 而这个 app 一个月才开几次,「顺手点一下推送」的成本几乎为零。
+   *    自动化在这里买到的东西,不值它带来的不确定性。
    *
-   *  ⚠️ 自动推**失败不弹窗**。它发生在你正在操作的时候,
-   *     弹窗会打断手上的事;而且断网是常态不是故障。
-   *     失败只留着 dirty 标记,设置页和主界面会显示「有改动还没推上去」。
-   *
-   *  ⚠️ 自动推**永不 force**。冲突时宁可不推,也不能在你没看见的时候
-   *     盖掉另一台设备的数据 —— 那种丢失查都没法查。
+   *    dirty 标记留着:主界面和设置页靠它显示「有改动还没推上去」。
    */
   var timer = null;
   var quiet = false;      // 正在往本地灌云端数据 —— 这期间的写入不算「你改的」
@@ -334,22 +332,11 @@ var Sync = (function () {
   function markDirty() {
     if (quiet) return;
     saveCfg({ dirty: true });
-    if (!ready() || typeof setTimeout === 'undefined') return;
-    if (timer) clearTimeout(timer);
-    timer = setTimeout(function () {
-      timer = null;
-      push({}).then(function (r) {
-        if (r.ok) clearDirty();
-        // 失败就留着 dirty —— 下次写入还会再试
-      });
-    }, 4000);
   }
   function clearDirty() { saveCfg({ dirty: false }); }
 
-  /** 页面要关了 —— 还欠着就最后推一次。
-   *  ⚠️ 防抖那 4 秒里关掉标签页的话,那一笔就只在本地了。 */
+  /** 手动推(设置页那个按钮走这条)。 */
   function flush() {
-    if (timer) { clearTimeout(timer); timer = null; }
     if (!ready() || !cfg().dirty) return Promise.resolve({ ok: true, skipped: true });
     return push({}).then(function (r) {
       if (r.ok) clearDirty();

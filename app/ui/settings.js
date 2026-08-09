@@ -360,51 +360,70 @@ var SettingsUI = (function () {
    *     而且丢得静悄悄。所以:云端空 → 直接推;云端有 → 摆出两边的
    *     期数和日期让你选。
    */
-  function syncNow() {
-    Modal.note({ title: '正在同步…', body: '连 GitHub 中。' });
-    Sync.pull().then(function (r) {
-      if (r.empty) {                       // 云端还没有 → 推上去
-        Modal.close();
-        return doPush();
+  /** 推到云端 —— 明确的方向,不问。
+   *
+   *  ⚠️ 只有一种情况会停下来问:**云端有别人推的新东西**。
+   *     那时候直接盖就是把另一台设备的改动扔掉,而且扔得没有痕迹。
+   */
+  function syncPush() {
+    Modal.note({ title: '正在推…', body: '连 GitHub 中。' });
+    Sync.push({}).then(function (r) {
+      Modal.close();
+      if (r.ok) {
+        Sync.clearDirty();
+        Modal.note({ title: '推上去了', body: '云端多了一个版本,随时能翻回来。' });
+        render();
+        return;
       }
-      if (!r.ok) { Modal.close(); Modal.note({ title: '拉不下来', body: r.why }); return; }
+      if (!r.conflict) { Modal.note({ title: '推不上去', body: r.why }); return; }
+
+      // 冲突:云端比我们上次推的新 —— 摆出两边让人选
+      Sync.pull().then(function (g) {
+        var mine = Store.inspectImport(Store.exportAll());
+        Modal.pick({
+          title: '云端有更新的版本',
+          hint: '云端 ' + (g.ok ? g.summary.snapshots + ' 期(到 ' + (g.summary.last || '?') + ')' : '读不出来') +
+                ' · 本机 ' + mine.summary.snapshots + ' 期(到 ' + (mine.summary.last || '?') + ')',
+          options: [
+            { key: 'pull', label: '先看云端那份(取下来)',
+              hint: '会先存回滚点 —— 推荐,别把另一台设备改的东西扔了' },
+            { key: 'force', label: '就用本机的盖掉云端', danger: true,
+              hint: '云端那边的改动会没有,而且找不回来' },
+          ],
+        }).then(function (v) {
+          if (v === 'pull' && g.ok) return doPull(g.data);
+          if (v === 'force') return doPush(true);
+        });
+      });
+    });
+  }
+
+  /** 从云端取下来。 */
+  function syncPullNow() {
+    Modal.note({ title: '正在取…', body: '连 GitHub 中。' });
+    Sync.pull().then(function (r) {
+      Modal.close();
+      if (r.empty) {
+        Modal.note({ title: '云端还是空的',
+                     body: '还没推过。先点「推到云端」把这台机器上的数据传上去。' });
+        return;
+      }
+      if (!r.ok) { Modal.note({ title: '取不下来', body: r.why }); return; }
 
       var mine = Store.inspectImport(Store.exportAll());
-      Modal.close();
+      // 本机空着 → 直接拉,没什么好问的
+      if (!mine.summary.snapshots) return doPull(r.data);
 
-      // ⚠️ **本机一期都没有 → 直接拉,不问方向。**
-      //    这正是「换了台新设备,想把数据同步过来」的场景 —— 而它是
-      //    第一次同步最常见的一次。问方向的话,选项里那句
-      //    「用本机的,盖掉云端」摆在第一个,手滑一下就用 0 期盖掉了云端全部历史。
-      //    没有任何数据的一边,不该有覆盖另一边的资格。
-      if (!mine.summary.snapshots) {
-        return doPull(r.data);
-      }
-
-      // 反过来也一样:云端是空文件(有文件但没数据),别拿它盖本机
-      if (!r.summary.snapshots) {
-        return doPush(true);
-      }
-
-      Modal.pick({
-        title: '两边都有数据 —— 用哪份?',
-        hint: '云端 ' + r.summary.snapshots + ' 期(到 ' + (r.summary.last || '?') + ')' +
-              ' · 本机 ' + mine.summary.snapshots + ' 期(到 ' + (mine.summary.last || '?') + ')',
-        // ⚠️ **新的那一边排在前面。** 两个选项长得一样重的话,
-        //    人会按位置点而不是按内容点 —— 那就等于随机选一边覆盖。
-        options: (mine.summary.last > r.summary.last ? [
-          { key: 'push', label: '用本机的,盖掉云端', hint: '本机这份更新(到 ' + mine.summary.last + ')' },
-          { key: 'pull', label: '用云端的,盖掉本机', danger: true,
-            hint: '会先存一个回滚点,后悔了能退回来' },
-        ] : [
-          { key: 'pull', label: '用云端的,盖掉本机', hint: '云端这份更新(到 ' + r.summary.last + ')' },
-          { key: 'push', label: '用本机的,盖掉云端', danger: true,
-            hint: '本机比云端旧 —— 确定的话才选' },
-        ]),
-      }).then(function (v) {
-        if (v === 'push') return doPush(true);
-        if (v === 'pull') return doPull(r.data);
-      });
+      Modal.confirm({
+        title: '用云端那份盖掉本机?',
+        body: '云端 ' + r.summary.snapshots + ' 期(到 ' + (r.summary.last || '?') + ')' +
+              ' · 本机 ' + mine.summary.snapshots + ' 期(到 ' + (mine.summary.last || '?') + ')。' +
+              (mine.summary.last > r.summary.last
+                 ? ' ⚠️ **本机这份比云端新**,盖了会丢东西。'
+                 : '') +
+              ' 会先存一个回滚点。',
+        ok: '取下来', danger: mine.summary.last > r.summary.last,
+      }).then(function (yes) { if (yes) doPull(r.data); });
     });
   }
 
@@ -487,12 +506,24 @@ var SettingsUI = (function () {
       ]),
     ]));
     if (Sync.ready()) {
+      // ⚠️ **推和拉分成两个按钮,不合并成一个「同步」。**
+      //    合并的话每次都得先探一次云端再问你方向,而你心里本来就清楚
+      //    这次是「把我改的传上去」还是「把那边的取下来」。
+      //    按钮上直接写方向,少一次问答,也少一次选错的机会。
+      var sy0 = Sync.cfg();
       w.appendChild(h('button', {
-        class: 'btn', style: 'margin-top:8px', onclick: syncNow,
-      }, ['立刻同步']));
+        class: 'btn', style: 'margin-top:8px', onclick: syncPush,
+      }, [sy0.dirty ? '推到云端(有改动)' : '推到云端']));
+      w.appendChild(h('button', {
+        class: 'btn ghost', style: 'margin-top:8px', onclick: syncPullNow,
+      }, ['从云端取下来']));
       w.appendChild(h('button', {
         class: 'btn ghost', style: 'margin-top:8px', onclick: syncHistory,
       }, ['从历史版本恢复']));
+      w.appendChild(h('div', { class: 'hint' }, [
+        '**不会自动推** —— 改完记得回来点一下。每推一次在云端留一个版本,' +
+        '「从历史版本恢复」能翻回任何一次。',
+      ]));
     }
 
     w.appendChild(h('h2', {}, ['备份文件']));

@@ -290,6 +290,7 @@ var NowUI = (function () {
 
     if (!snap) {
       w.appendChild(h('h1', {}, ['还没有数据']));
+      w.className = 'wrap wrap-fill';   // 空状态：把 tab 栏以上占满，内容居中
       w.appendChild(h('div', { class: 'empty' }, [
         h('div', { class: 'big' }, ['📊']),
         h('div', { style: 'font-weight:600' }, ['先录一期,或者导入备份']),

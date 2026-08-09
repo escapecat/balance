@@ -122,19 +122,12 @@
     });
   }
 
-  // ⚠️ **页面要关了,还欠着就最后推一次。**
-  //    自动推有 4 秒防抖,而人保存完就切走是常态 —— 那 4 秒里关掉标签页,
-  //    刚录的那期就只在本地了,你在另一台设备上打开会以为没录过。
-  //
-  //    用 visibilitychange 而不是 beforeunload:手机上切到后台、
-  //    杀进程都不触发 beforeunload,而这个 app 主要在手机上用。
-  if (typeof document.addEventListener === 'function') {
-    document.addEventListener('visibilitychange', function () {
-      if (document.visibilityState === 'hidden' && typeof Sync !== 'undefined') {
-        Sync.flush();
-      }
-    });
-  }
+  // ⚠️ 这里**没有「切后台就自动推」**,去掉了。
+  //    推送会写另一台设备也在读的那份文件,冲突了要人来判断;
+  //    而它发生在你切走的那一瞬间,失败了弹窗打断你、不弹窗又等于吞掉。
+  //    这个 app 一个月开几次,「顺手点一下推送」的成本几乎为零 ——
+  //    自动化在这里买到的东西,不值它带来的不确定性。
+  //    有改动没推的话,主界面会有一行提示。
 
   // 升级过就说一声 —— 静默升级和静默出错长得一模一样,
   // 而你需要知道「今天这个数不对」和「昨天我升过级」有没有关系。

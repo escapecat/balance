@@ -127,6 +127,7 @@ var StatsUI = (function () {
     w.appendChild(h('h1', {}, ['统计']));
 
     if (snaps.length < 2) {
+      w.className = 'wrap wrap-fill';   // 空状态：把 tab 栏以上占满，内容居中
       w.appendChild(h('div', { class: 'empty' }, [
         h('div', { class: 'big' }, ['⌗']),
         h('div', {}, ['至少要两期才有得比']),

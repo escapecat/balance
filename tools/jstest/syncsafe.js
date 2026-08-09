@@ -49,7 +49,9 @@ global.Store = {
 // ⚠️ 假的 fetch —— 记下每一次请求。**不许真的打网络**:
 //    测试要能离线跑,而且不能因为 GitHub 抽风就变红。
 var remote = null;        // 云端那份(null = 还没有文件)
+var calls = 0;
 global.fetch = function (url, opt) {
+  calls++;
   var method = (opt || {}).method || 'GET';
   if (method === 'GET' && url.indexOf('/contents/') >= 0) {
     if (!remote) return Promise.resolve(mkRes(404, { message: 'Not Found' }));
@@ -74,22 +76,12 @@ global.TextDecoder = require('util').TextDecoder;
 global.btoa = function (s) { return Buffer.from(s, 'binary').toString('base64'); };
 global.atob = function (s) { return Buffer.from(s, 'base64').toString('binary'); };
 
-// ⚠️ 拦下 setTimeout —— 自动推是**延迟 4 秒**发生的,测试早就 exit 了。
-//    只看 pushed 的话,「有没有安排推送」这件事根本测不到。
-var scheduled = 0;
-var realTimeout = global.setTimeout;
-global.setTimeout = function (fn, ms) {
-  if (ms === 4000) { scheduled++; return 0; }   // 那是自动推的防抖
-  return realTimeout(fn, ms);
-};
-
 var Sync = require(path.join(A, 'lib', 'sync.js'));
 
 var fail = 0;
 function ok(c, m) { if (!c) { console.log('  FAIL ' + m); fail++; } }
 
 function reset(localSnaps, remoteSnaps) {
-  scheduled = 0;
   mem = { sync: { owner: 'me', repo: 'data', token: 't' } };
   mem.snapshots = localSnaps;
   pushed = [];
@@ -131,14 +123,23 @@ Sync.push({}).then(function (r) {
   ok(!r4.ok && r4.conflict, '★ sha 对不上时必须拒绝写');
   ok(pushed.length === 0, '★ 冲突时也不许发出去 —— 静默覆盖查都没法查');
 
-  // ---- 4. 自动推(markDirty 那条路)永远不 force ----
+  // ---- 4. ★ 改数据**不许自己联网** ----
   //
-  // ⚠️ 自动推发生在你没看着的时候。它要是能 force,
-  //    「另一台设备的数据被悄悄盖掉」就成了日常。
-  reset([], SNAP);
-  var src = require('fs').readFileSync(path.join(A, 'lib', 'sync.js'), 'utf8');
-  var auto = src.slice(src.indexOf('function markDirty'), src.indexOf('function clearDirty'));
-  ok(auto.indexOf('force') < 0, '★ 自动推的代码里不许出现 force');
+  // ⚠️ 同步改成全手动之后,这条是那个决定的守卫:
+  //    markDirty 只该打个记号。它要是又长出「顺手推一下」的逻辑,
+  //    就等于自动推悄悄回来了 —— 而当初去掉它是有理由的
+  //    (推送会写另一台设备也在读的文件,冲突要人判断)。
+  //
+  // ⚠️ 这里数的是 **fetch 调用次数**,不是「代码里有没有某个词」。
+  //    上一版写的是「自动推的代码里不许出现 force」—— 那种断言
+  //    在自动推被删掉之后变成永真,而永真的断言比没有断言更糟:
+  //    它让人以为这块被守着。
+  reset(SNAP, SNAP);
+  var before = calls;
+  Store.set('snapshots', SNAP.concat([{ date: '2026-10-31' }]));
+  ok(calls === before, '★ 改数据不许触发任何网络请求(实际发了 ' +
+     (calls - before) + ' 次)');
+  ok(mem.sync.dirty === true, '改完要留下「有改动没推」的记号');
 
   // ---- 5. ★ 开机自动拉:只在绝对安全时拉 ----
   //
@@ -160,13 +161,9 @@ Sync.push({}).then(function (r) {
   ok((mem.snapshots || []).length === 2, '拉完本机应该有 2 期,实际 ' +
      (mem.snapshots || []).length);
   ok(mem.sync.dirty === false, '★ 拉进来的写入不算「你改的」,dirty 要是假');
-  // ⚠️ **不能只看 pushed 是不是空的。** 自动推有 4 秒防抖,
-  //    测试跑完早就 exit 了,`pushed.length === 0` 无论如何都成立 ——
-  //    那条断言从写下来就是装饰(把 quiet 那行注释掉,它照样绿)。
-  //    要测的是**有没有安排推送**,所以查 setTimeout 被调用了没。
-  ok(scheduled === 0,
-     '★ 拉完不许安排推送 —— 那是把刚拉下来的原样推回去,白多一个 commit' +
-     '(实际安排了 ' + scheduled + ' 次)');
+  // ⚠️ 拉完那一刻本机被写了六七个 key。**那些写入不算「你改的」**,
+  //    否则页面上会立刻显示「有改动还没推上去」—— 而你什么都没做。
+  ok(mem.sync.dirty === false, '★ 拉完不许留下「有改动」的记号');
 
   // ★ 云端比本机旧 → 别拉(推送记录丢了的情况)
   reset([{ date: '2026-07-30' }, { date: '2026-09-30' }], [{ date: '2026-07-30' }]);
@@ -176,7 +173,7 @@ Sync.push({}).then(function (r) {
   ok((mem.snapshots || []).length === 2, '本机那两期一个都不能少');
 
   console.log(fail ? '  同步安全 ' + fail + ' 条没过'
-                   : '  同步安全 ok(空的不推 · 冲突不盖 · 自动推不 force · ' +
-                     '脏了不拉 · 拉完不反手推)');
+                   : '  同步安全 ok(空的不推 · 冲突不盖 · 改数据不联网 · ' +
+                     '脏了不拉 · 拉完不留脏记号)');
   process.exit(fail ? 1 : 0);
 });

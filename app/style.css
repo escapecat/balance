@@ -696,31 +696,25 @@ h2 .n { color: var(--text-dim2); font-weight: 500; margin-left: var(--s1);
    下面留一大片黑,看着像页面没加载完 —— 真机截图上那半屏空白就是这么来的。
    min-height 用 svh 而不是 vh:手机浏览器的地址栏会伸缩,
    vh 按最大高度算,于是内容被顶下去一截,反而要滚动才看得全。 */
-/* ⚠️ 上一版给 .empty 定了个固定的 min-height，**没算它上面那个 h1**。
-   于是「统计」「历史」这种带标题的页面，底下就差多少露多少 ——
-   而「现在」页正好内容多一点，看着像修好了。
-   固定高度在这儿是错的解法：真正要的是「把剩下的空间占满」，
-   而那只有让父容器也参与布局才做得到。 */
-.wrap:has(> .empty) {
-  min-height: calc(100svh - 64px - env(safe-area-inset-bottom) - env(safe-area-inset-top));
+/* ⚠️ 空状态要把 tab 栏以上的空间占满,内容在其中居中。
+   ⚠️ **不用 :has()** —— 我没法在你的真机上验证它，而猜浏览器支持什么
+      是错的做法。改成由 JS 显式加 .wrap-fill 这个 class：
+      哪个页面是空状态，渲染它的代码最清楚，不需要 CSS 去反推。
+   ⚠️ 高度要减掉 body 已经付过的那几笔(tab 栏 64px + 上下安全区)，
+      否则会重复扣减，内容区反而比可视区还矮，底下照样空一截。 */
+.wrap-fill {
+  min-height: calc(100svh - 64px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
   display: flex; flex-direction: column;
 }
-.wrap:has(> .empty) > .empty {
+@supports not (height: 100svh) {
+  .wrap-fill { min-height: calc(100vh - 64px); }
+}
+.wrap-fill > .empty {
   flex: 1;
   display: flex; flex-direction: column;
   align-items: center; justify-content: center;
 }
-.empty { padding: var(--s5) var(--s4); }
-
-/* :has 不支持时(Safari 15.4 以前)退回一个够用的固定高度 ——
-   偏一点好过完全不居中。 */
-@supports not selector(:has(> *)) {
-  .empty {
-    min-height: calc(100vh - 260px);
-    display: flex; flex-direction: column;
-    align-items: center; justify-content: center;
-  }
-}
+.empty { padding: var(--s5) var(--s4); text-align: center; color: var(--text-dim); }
 .empty .big { font-size: 30px; opacity: .35; margin-bottom: var(--s3); }
 .empty .hint { max-width: 26em; margin-left: auto; margin-right: auto; }
 

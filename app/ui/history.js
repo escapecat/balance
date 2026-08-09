@@ -82,6 +82,7 @@ var HistoryUI = (function () {
     w.appendChild(h('h1', {}, ['历史']));
 
     if (!snaps.length) {
+      w.className = 'wrap wrap-fill';   // 空状态：把 tab 栏以上占满，内容居中
       w.appendChild(h('div', { class: 'empty' }, [
         h('div', { class: 'big' }, ['≡']),
         h('div', {}, ['还没有记录 —— 录一期就有了']),

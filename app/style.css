@@ -228,15 +228,34 @@ body {
      CSS 规范里 flex item 在交叉轴上有 auto margin 时，stretch 会被禁用，
      宽度退回按内容算。表现是整个页面突然变窄（有多少字占多宽）。 */
   width: 100%;
-  /* flex:1 0 auto 让它至少撑满 .page —— 这样底色是连续的一整块，
-     而不是「内容那一截有底色，下面是另一块」。
-     ⚠️ 不再往里传 flex（不再有 .fill-rest），所以这里也不设 display:flex。 */
+  /* flex:1 0 auto 让它至少撑满 .page —— 底色是连续的一整块。
+     display:flex 是为了把高度继续传给最后那块列表（见下面的 :last-child）。 */
   flex: 1 0 auto;
+  display: flex;
+  flex-direction: column;
 }
-/* ⚠️ 这里**曾经有 .fill-rest**，用来把最后一块列表拉长、填掉底部空白。
-   撤掉了 —— 它把一部分页面的按钮推到了屏幕最底下，而那种「内容在上、
-   按钮孤零零沉在底」的排布，比原来那点空白更难看。
-   底部露出的背景已经和卡片同色，本来就看不出断层。 */
+/* 最后一块列表铺到底 —— 消掉它和 tab 栏之间那道「到此为止」的界线。
+ *
+ *  ⚠️ **只在它真的是 .wrap 的最后一个孩子时**才铺。
+ *     早先的版本会跳过按钮往前找，结果把按钮推到屏幕最底下 ——
+ *     「内容在上、按钮孤零零沉在底」比那点空白更难看。
+ *     所以这里用 `:last-child`，后面还有东西的页面一律不动。
+ *
+ *  ⚠️ 铺到底之后底部圆角和下边框都要去掉:留着的话，
+ *     那条线就是「下巴」的上沿，而它正是我们要消掉的东西。 */
+.wrap > .list:last-child,
+.wrap > .card:last-child {
+  flex: 1 0 auto;
+  margin-bottom: calc(var(--s4) * -1);   /* 抵消 .wrap 的下内边距 */
+  border-bottom: 0;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.wrap > .list:last-child > :last-child,
+.wrap > .card:last-child > :last-child {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
 
 
 h1 { font-size: var(--t-lg); font-weight: 650; margin: var(--s1) 0 var(--s1);
@@ -485,6 +504,22 @@ input:focus, select:focus {
 .tabbar .ic { display: block; font-size: 19px; line-height: 1.35; }
 
 .empty { text-align: center; color: var(--text-dim); padding: var(--s6) var(--s5); }
+
+/* ⚠️ **空状态在剩余空间里垂直居中。**
+   内容就那么点（一个图标 + 两行字），顶在最上面的话下面空掉半屏，
+   看着像页面没加载完 —— 手机屏越高越明显。
+   .wrap 已经撑满 .page 且是 flex 竖排，所以上下 auto margin
+   就是「把剩余空间平均分到我上下」。
+
+   ⚠️ 只管 :last-child。空状态夹在中间时（下面还有别的块），
+      auto margin 会把它和下文擑开一大段 —— 那是另一种难看。
+
+   ⚠️ 只写上下两个方向。左右也写 auto 会关掉交叉轴的 stretch，
+      宽度退回按内容算 —— .wrap 刚栽过这个跟头。 */
+.wrap > .empty:last-child {
+  margin-top: auto;
+  margin-bottom: auto;
+}
 .empty .big { font-size: var(--t-xl); margin-bottom: var(--s2); opacity: .7; }
 
 /* ---- 列表 ----

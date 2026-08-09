@@ -337,12 +337,9 @@ var NowUI = (function () {
    *     多一步都会让人想「回头再说」,而回头就忘了。
    */
   function recordOne() {
-    // ⚠️ **第一次记账之前,先问清「从哪天算起买卖都记全了」。**
-    //    这是工具没法知道、只有你知道的一件事:上次对账到今天之间,
-    //    你可能买过东西没记。猜的话两种错法都很糟 ——
-    //    猜早了,那几天的买入会被算成「市场涨跌」,数字全错还看不出来;
-    //    猜晚了,整个第一期白等。
-    //    所以问一次,一次就够,以后再也不问。
+    // ⚠️ 第一次记账之前问一句「上次对账之后买卖过没有」。
+    //    这是工具没法知道、只有你知道的一件事 —— 而它决定了
+    //    这一期的涨跌算不算得出来。问一次,以后再也不问。
     if (Actions.needsStart()) { askStart(recordOne); return; }
     doRecord();
   }
@@ -350,26 +347,33 @@ var NowUI = (function () {
   function askStart(then) {
     var snaps = Store.get('snapshots', []) || [];
     var last = Ledger.latest(snaps);
-    var opts = [];
-    if (last) {
-      opts.push({ key: last.date, label: last.date + ' 之后的都记全了',
-                  hint: '上次对账那天。这么选的话下次对账就能算出涨跌' });
-    }
-    opts.push({ key: today(), label: '从今天开始记',
-                hint: last ? '上次对账到今天之间买过东西但没记 —— 那要多等一期'
-                           : '之后每笔买卖都记下来' });
+    if (!last) { Actions.startFrom(today()); if (then) then(); return; }
+
+    // ⚠️ 问的是**你知道答案的那个问题**:上次对账之后买卖过没有。
+    //    不要问「从哪天开始记账」—— 那是工具的内部概念,
+    //    而你的做法本来就是「买了就录」。
     Modal.pick({
-      title: '从哪天起,买卖都记下来了?',
-      hint: '**只问这一次。** 有了它才分得开「涨了多少」和「你又投了多少」。',
-      options: opts,
-    }).then(function (d) {
-      if (!d) return;
-      Actions.startFrom(d);
+      title: last.date + ' 之后,买卖过基金吗?',
+      hint: '**只问这一次。** 有了这个才分得开「涨了多少」和「你又投了多少」。',
+      options: [
+        { key: 'none', label: '没有',
+          hint: '那从 ' + last.date + ' 算起就是全的,下次对账就能算出涨跌' },
+        { key: 'backfill', label: '有,我现在补录',
+          hint: '几笔都行,日期填当时的' },
+        { key: 'today', label: '记不清了,从今天算',
+          hint: '安全但要多等一期 —— 这一期的涨跌仍然分不出来' },
+      ],
+    }).then(function (v) {
+      if (!v) return;
+      if (v === 'today') { Actions.startFrom(today()); if (then) then(); return; }
+      Actions.startFrom(last.date);
+      if (v === 'backfill') { doRecord(last.date); return; }
       if (then) then();
     });
   }
 
-  function doRecord() {
+  /** @param backfillFrom 补录模式:给个日期下限,让人填当时的日期 */
+  function doRecord(backfillFrom) {
     Modal.pick({
       title: '记一笔',
       hint: '不记的话,这笔钱下次会被算成「市场涨跌」',
@@ -410,12 +414,65 @@ var NowUI = (function () {
           type: 'number', suffix: '元',
         }).then(function (v) {
           if (v == null || v === '') return;
-          var r = Actions.add({ date: today(), kind: kind, code: f.code,
-                                category: f.category, amount: parseFloat(v) });
-          if (!r.ok) { Modal.note({ title: '记不下来', body: r.why }); return; }
-          render();
+          var amount = parseFloat(v);
+          // ⚠️ 补录时**日期必须能改**。你不可能每次都在基金 app 点完确认的
+          //    那一刻就打开这里 —— 隔两天想起来是常态。
+          //    而日期错了,这笔就落到了错的那一期,两期的涨跌同时错。
+          if (backfillFrom) { askDate(backfillFrom, function (dt) { save(dt); }); }
+          else save(today());
+
+          function save(dt) {
+            var r = Actions.add({ date: dt, kind: kind, code: f.code,
+                                  category: f.category, amount: amount });
+            if (!r.ok) { Modal.note({ title: '记不下来', body: r.why }); return; }
+            if (backfillFrom) {
+              // 补录多半不止一笔 —— 存完直接问要不要再来一笔,
+              // 而不是退回首页让人重新点四层进来
+              Modal.pick({
+                title: '记好了',
+                hint: dt + ' · ' + (f.name || f.code) + ' ' + money(amount),
+                options: [{ key: 'more', label: '还有一笔要补' },
+                          { key: 'done', label: '补完了' }],
+              }).then(function (again) {
+                if (again === 'more') doRecord(backfillFrom); else render();
+              });
+              return;
+            }
+            render();
+          }
         });
       });
+    });
+  }
+
+  /** 哪天的这一笔。**只在补录时问** —— 平时记的都是刚做完的事,
+   *  多一步就多一次「回头再说」的机会,而回头就忘了。
+   *  @param from 下限:上次对账日。早于它的落在上一期,那期已经结账了 */
+  function askDate(from, then) {
+    Modal.ask({
+      title: '这笔是哪天的?',
+      hint: from + ' 之后的日期,格式 ' + today(),
+      value: today(),
+    }).then(function (v) {
+      if (!v) return;
+      var d = String(v).trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || isNaN(Date.parse(d))) {
+        Modal.note({ title: '日期看不懂', body: '得是 ' + today() + ' 这种格式。' });
+        return;
+      }
+      // ⚠️ 早于上次对账的不收:那一期的数字已经定了,
+      //    往里塞一笔会让**已经看过的那期涨跌悄悄变掉**。
+      if (d <= from) {
+        Modal.note({ title: '这个日期太早了',
+                     body: from + ' 那一期已经对过账了,再往里加会让那期的涨跌变掉。\n' +
+                           '如果真需要,先去历史页删掉那一期再重录。' });
+        return;
+      }
+      if (d > today()) {
+        Modal.note({ title: '这是将来的日期', body: '记的应该是已经发生的事。' });
+        return;
+      }
+      then(d);
     });
   }
 

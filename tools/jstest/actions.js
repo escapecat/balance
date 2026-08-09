@@ -171,6 +171,30 @@ Actions.startFrom('2026-07-30');
 ok(Actions.covered('2026-07-30'), '声明之后,起点当天及以后的区间就算数了');
 ok(!Actions.covered('2026-07-01'), '起点之前的还是不算');
 
+// ---- 8c. ★ 补录:日期填当时的,而不是记账那天 ----
+//
+// 你不可能每次都在基金 app 点完确认那一刻就打开这里,隔两天想起来是常态。
+// 日期落错了的话,这笔会算进错的那一期 —— **两期的涨跌同时错**,
+// 一期多算、一期少算,而总额完全对得上,所以查不出来。
+reset();
+Actions.startFrom('2026-07-30');
+Actions.add({ date: '2026-08-05', kind: 'buy', code: 'A', amount: 40000 });  // 补录
+Actions.add({ date: '2026-09-15', kind: 'buy', code: 'A', amount: 10000 });  // 下一期的
+
+near(Actions.netBuy('2026-07-30', '2026-09-01').total, 40000,
+     '★ 补录的那笔没落进它该在的那一期');
+near(Actions.netBuy('2026-09-01', '2026-10-01').total, 10000,
+     '★ 下一期的那笔串到别处去了');
+
+// 补录之后,跨越记账起点的那一期就能算了 —— 这正是「补录」存在的理由
+var dBack = Ledger.delta(
+  { date: '2026-09-01', holdings: { A: 145000 }, cash: { c: 60000 } },
+  { date: '2026-07-30', holdings: { A: 100000 }, cash: { c: 100000 } });
+ok(dBack.source === 'actions',
+   '★ 补录完了那一期还是算不出来 —— 那补录就白做了');
+near(dBack.market, 5000, '涨跌 = 持仓变化 45000 − 买进去的 40000');
+near(dBack.inflow, 0, '钱只是从现金搬到基金');
+
 // 区间是左开右闭 —— 对账日当天的买入算这一期
 reset();
 Actions.add({ date: '2026-08-01', kind: 'buy', code: 'A', amount: 111 });

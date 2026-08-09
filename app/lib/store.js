@@ -49,9 +49,25 @@ var Store = (function () {
     }
   }
 
+  // 哪些 key 值得同步。
+  //
+  // ⚠️ **`sync` 自己必须排除**,否则 markDirty 写 sync → 又触发 markDirty,
+  //    无限递归,浏览器直接卡死。
+  // ⚠️ `draft` 也排除:那是录到一半的草稿,每失焦就写一次 ——
+  //    同步它等于抄数字的过程中不停推 commit。
+  // ⚠️ 回滚点排除:它是**本机**的后路。推上去的话,从另一台设备
+  //    拉数据时会把那台机器的后路一起覆盖掉。
+  var SYNCED = { settings: 1, snapshots: 1, assets: 1, todos: 1, flows: 1, prefs: 1 };
+
   function set(key, value) {
     try {
       localStorage.setItem(NS + key, JSON.stringify(value));
+      // ⚠️ 脏标记打在**这一处**,不散到各个 core 模块里。
+      //    写入点有六七个(commit / append / remove / complete / save …),
+      //    逐个加钩子必然漏一个 —— 而漏掉的表现是「这类改动从来不同步」,
+      //    悄无声息,直到换台设备才发现少了东西。
+      //    Store 是唯一碰 localStorage 的地方,天然是拦截点。
+      if (SYNCED[key] && typeof Sync !== 'undefined') Sync.markDirty();
       return true;
     } catch (e) {
       // 配额满 / 隐私模式。这里必须让调用方知道 —— 静默失败会让你

@@ -315,14 +315,170 @@ var SettingsUI = (function () {
     el.appendChild(w);
   }
 
+  /** 配同步 —— **token 必须你自己去生成**,我没法替你点那几下。 */
+  function syncSetup() {
+    var c = Sync.cfg();
+    Modal.form({
+      title: '同步到 private 仓库',
+      hint: '数据推到一个**私有**仓库,一次保存一个 commit,于是版本历史免费得到。' +
+            'token 去 GitHub → Settings → Developer settings → ' +
+            'Fine-grained tokens 生成,**只授权这一个仓库的 Contents 读写**。',
+      fields: [
+        { key: 'owner', label: 'GitHub 用户名' },
+        { key: 'repo', label: '仓库名', hint: '必须是 private' },
+        { key: 'token', label: 'token', hint: 'github_pat_… 只存在这台设备上' },
+      ],
+      values: { owner: c.owner || 'escapecat', repo: c.repo || 'balance-data',
+                token: c.token || '' },
+      validate: function (v) {
+        if (!v.owner || !v.repo) return '用户名和仓库名都得填。';
+        if (!v.token) return 'token 不能空 —— 没有它连不上。';
+        return null;
+      },
+      ok: '存下来并测一次',
+    }).then(function (v) {
+      if (!v) return;
+      Sync.saveCfg({ owner: v.owner.trim(), repo: v.repo.trim(),
+                     token: v.token.trim(), sha: null });
+      // ⚠️ **存完立刻测**,不能等到某天发现三个月没同步过。
+      return Sync.check().then(function (r) {
+        if (!r.ok) {
+          Modal.note({ title: '连不上', body: r.why });
+          render();
+          return;
+        }
+        Modal.note({ title: '通了', body: r.repo + ' 可读可写,而且是 private。' });
+        render();
+      });
+    });
+  }
+
+  /** 立刻同步。
+   *
+   *  ⚠️ **第一次要问方向。** 云端有数据、本地也有数据的时候,
+   *     谁覆盖谁是个不能替用户决定的问题 —— 猜错就是丢一边的数据,
+   *     而且丢得静悄悄。所以:云端空 → 直接推;云端有 → 摆出两边的
+   *     期数和日期让你选。
+   */
+  function syncNow() {
+    Modal.note({ title: '正在同步…', body: '连 GitHub 中。' });
+    Sync.pull().then(function (r) {
+      if (r.empty) {                       // 云端还没有 → 推上去
+        Modal.close();
+        return doPush();
+      }
+      if (!r.ok) { Modal.close(); Modal.note({ title: '拉不下来', body: r.why }); return; }
+
+      var mine = Store.inspectImport(Store.exportAll());
+      Modal.close();
+      Modal.pick({
+        title: '两边都有数据 —— 用哪份?',
+        hint: '云端 ' + r.summary.snapshots + ' 期(到 ' + (r.summary.last || '?') + ')' +
+              ' · 本机 ' + mine.summary.snapshots + ' 期(到 ' + (mine.summary.last || '?') + ')',
+        options: [
+          { key: 'push', label: '用本机的,盖掉云端', hint: '本机这份更新的话选这个' },
+          { key: 'pull', label: '用云端的,盖掉本机', danger: true,
+            hint: '会先存一个回滚点,后悔了能退回来' },
+        ],
+      }).then(function (v) {
+        if (v === 'push') return doPush(true);
+        if (v === 'pull') return doPull(r.data);
+      });
+    });
+  }
+
+  function doPush(force) {
+    return Sync.push({ force: force }).then(function (r) {
+      if (!r.ok) {
+        Modal.note({ title: r.conflict ? '有冲突' : '推不上去', body: r.why });
+        return;
+      }
+      Sync.clearDirty();
+      Modal.note({ title: '推上去了', body: '这一版在 GitHub 上留了一个 commit。' });
+      render();
+    });
+  }
+
+  function doPull(data) {
+    // ⚠️ 覆盖本机之前**先存回滚点**。这是唯一一个会一次性
+    //    抹掉全部本地数据的操作,没有后路是不行的。
+    Store.saveRollback('从云端拉取之前');
+    var r = Store.importAll(data);
+    if (!r.ok) { Modal.note({ title: '导入失败', body: r.why }); return; }
+    Sync.clearDirty();
+    if (onChanged) onChanged();
+    Modal.note({ title: '拉下来了', body: '本机已经换成云端那份。后悔了去「退回」。' });
+    render();
+  }
+
+  /** 从历史版本恢复 —— 「改坏了怎么办」的正经答案。 */
+  function syncHistory() {
+    Modal.note({ title: '读历史中…', body: '' });
+    Sync.history(20).then(function (r) {
+      Modal.close();
+      if (!r.ok) { Modal.note({ title: '读不到历史', body: r.why }); return; }
+      if (!r.list.length) { Modal.note({ title: '还没有历史', body: '同步一次就有了。' }); return; }
+      Modal.pick({
+        title: '恢复到哪一版',
+        hint: '选一版先看看内容,确认之后才会覆盖本机。',
+        options: r.list.slice(0, 12).map(function (x) {
+          return { key: x.sha,
+                   label: (x.date || '').slice(0, 16).replace('T', ' '),
+                   hint: x.message };
+        }),
+      }).then(function (sha) {
+        if (!sha) return;
+        Sync.at(sha).then(function (v) {
+          if (!v.ok) { Modal.note({ title: '取不到那一版', body: v.why }); return; }
+          Modal.confirm({
+            title: '换成这一版?',
+            body: '这一版有 ' + v.summary.snapshots + ' 期,最后一期 ' +
+                  (v.summary.last || '?') + '。' +
+                  '会先存一个回滚点,后悔了能退回来。',
+            ok: '换', danger: true,
+          }).then(function (yes) { if (yes) doPull(v.data); });
+        });
+      });
+    });
+  }
+
   /** 二级屏:数据与备份。低频操作全在这儿。 */
   function dataScreen() {
     var w = h('div', { class: 'wrap' });
     w.appendChild(h('h1', {}, ['数据与备份']));
 
-    w.appendChild(h('h2', {}, ['备份']));
+    // ---- 同步 ----
+    //
+    // ⚠️ 放在最上面,因为它一旦配好,下面那个「唯一的兜底」就不再是唯一的。
+    var sy = Sync.status();
+    w.appendChild(h('h2', {}, ['同步']));
+    w.appendChild(h('div', { class: 'list' }, [
+      h('div', { class: 'list-row', onclick: syncSetup }, [
+        h('div', { class: 'body' }, [
+          h('div', { class: 'ttl' }, [
+            Sync.ready() ? (Sync.cfg().owner + '/' + Sync.cfg().repo) : '还没开',
+          ]),
+          h('div', { class: 'sub2' }, [
+            Sync.ready() ? sy.text : '推到一个 private 仓库,换设备也能用',
+          ]),
+        ]),
+        h('span', { class: 'chev' }),
+      ]),
+    ]));
+    if (Sync.ready()) {
+      w.appendChild(h('button', {
+        class: 'btn', style: 'margin-top:8px', onclick: syncNow,
+      }, ['立刻同步']));
+      w.appendChild(h('button', {
+        class: 'btn ghost', style: 'margin-top:8px', onclick: syncHistory,
+      }, ['从历史版本恢复']));
+    }
+
+    w.appendChild(h('h2', {}, ['备份文件']));
     w.appendChild(h('div', { class: 'hint', style: 'margin-bottom:8px' }, [
-      '数据只存在这台设备的浏览器里。**换手机、清缓存都会丢** —— 这是唯一的兜底。',
+      Sync.ready()
+        ? '同步之外再存一份 —— 两处都坏的概率比一处小得多。'
+        : '数据只存在这台设备的浏览器里。**换手机、清缓存都会丢** —— 这是唯一的兜底。',
     ]));
     w.appendChild(h('button', { class: 'btn ghost', onclick: exportFile }, ['导出备份']));
     w.appendChild(h('button', { class: 'btn ghost', style: 'margin-top:8px',

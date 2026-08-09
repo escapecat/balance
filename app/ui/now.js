@@ -238,6 +238,17 @@ var NowUI = (function () {
       ]));
     }
 
+    // ---- 同步没跟上 ----
+    //
+    // ⚠️ **只在没跟上的时候出现。** 一切正常时说「已同步」是噪音:
+    //    它每次都在,于是你不再看它,那它真的变成「未同步」时也不会被看到。
+    //    没开同步也不提 —— 那是个选择,不是个错误。
+    if (typeof Sync !== 'undefined' && Sync.ready() && Sync.cfg().dirty) {
+      w.appendChild(h('div', { class: 'note warn', style: 'margin-top:16px' }, [
+        '有改动**还没推到云端**。断网的时候这是正常的 —— 联网后会自己重试。',
+      ]));
+    }
+
     // ---- 入口 ----
     w.appendChild(h('button', {
       class: 'btn', style: 'margin-top:24px', onclick: function () { onEntry(); },

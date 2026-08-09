@@ -118,6 +118,21 @@ if git ls-files | xargs grep -nE '[0-9],[0-9]{3}' 2>/dev/null \
   fail=1
 fi
 
+# ---- 守卫 5b:token 的**内容**不进仓库 ----
+#
+# 上面那条只查文件名带不带 token —— 而真正会漏出去的是**粘进代码里的那一串**:
+# 调同步接口时手快写死一个测试用的 token、注释里留一个示例值。
+# 文件名完全正常,git ls-files 那条一个字都查不到。
+#
+# GitHub 的 fine-grained PAT 以 github_pat_ 开头,classic 的是 ghp_ / gho_ / ghs_。
+# 真要写示例就写 github_pat_xxx(x 不算数字字母混排,下面的正则要求 20 位以上)。
+if git ls-files 2>/dev/null | xargs grep -nE '(github_pat_|gh[pousr]_)[A-Za-z0-9_]{20,}' 2>/dev/null    | grep -q .; then
+  echo "✗ 仓库里出现了真的 GitHub token —— 立刻去 GitHub 撤销它:"
+  git ls-files | xargs grep -nE '(github_pat_|gh[pousr]_)[A-Za-z0-9_]{20,}' 2>/dev/null
+  echo "   token 只存 localStorage。撤销地址:https://github.com/settings/tokens"
+  fail=1
+fi
+
 # ---- 守卫 6:颜色只能来自令牌 ----
 #
 # style.css 开头就写着「组件里出现字面 #rrggbb 就是 bug」,

@@ -147,7 +147,16 @@
 
 body {
   margin: 0;
-  padding: 0 0 calc(64px + env(safe-area-inset-bottom));
+  /* ⚠️ **四边都要留安全区，不只是底部。**
+     加到主屏之后是 standalone 模式，没有 Safari 地址栏顶着 ——
+     内容会直接顶到屏幕最上沿，和状态栏的时间、信号图标叠在一起。
+     第一版只写了 bottom（因为 tab 栏在下面，那个问题一眼看得见），
+     而顶部的重叠要在真机上加到主屏才复现得出来。
+     左右两边是横屏时的刘海。 */
+  padding: env(safe-area-inset-top)
+           env(safe-area-inset-right)
+           calc(64px + env(safe-area-inset-bottom))
+           env(safe-area-inset-left);
   background: var(--bg);
   color: var(--text);
   font: var(--t-base)/1.6 system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;

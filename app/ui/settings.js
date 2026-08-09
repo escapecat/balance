@@ -371,15 +371,36 @@ var SettingsUI = (function () {
 
       var mine = Store.inspectImport(Store.exportAll());
       Modal.close();
+
+      // ⚠️ **本机一期都没有 → 直接拉,不问方向。**
+      //    这正是「换了台新设备,想把数据同步过来」的场景 —— 而它是
+      //    第一次同步最常见的一次。问方向的话,选项里那句
+      //    「用本机的,盖掉云端」摆在第一个,手滑一下就用 0 期盖掉了云端全部历史。
+      //    没有任何数据的一边,不该有覆盖另一边的资格。
+      if (!mine.summary.snapshots) {
+        return doPull(r.data);
+      }
+
+      // 反过来也一样:云端是空文件(有文件但没数据),别拿它盖本机
+      if (!r.summary.snapshots) {
+        return doPush(true);
+      }
+
       Modal.pick({
         title: '两边都有数据 —— 用哪份?',
         hint: '云端 ' + r.summary.snapshots + ' 期(到 ' + (r.summary.last || '?') + ')' +
               ' · 本机 ' + mine.summary.snapshots + ' 期(到 ' + (mine.summary.last || '?') + ')',
-        options: [
-          { key: 'push', label: '用本机的,盖掉云端', hint: '本机这份更新的话选这个' },
+        // ⚠️ **新的那一边排在前面。** 两个选项长得一样重的话,
+        //    人会按位置点而不是按内容点 —— 那就等于随机选一边覆盖。
+        options: (mine.summary.last > r.summary.last ? [
+          { key: 'push', label: '用本机的,盖掉云端', hint: '本机这份更新(到 ' + mine.summary.last + ')' },
           { key: 'pull', label: '用云端的,盖掉本机', danger: true,
             hint: '会先存一个回滚点,后悔了能退回来' },
-        ],
+        ] : [
+          { key: 'pull', label: '用云端的,盖掉本机', hint: '云端这份更新(到 ' + r.summary.last + ')' },
+          { key: 'push', label: '用本机的,盖掉云端', danger: true,
+            hint: '本机比云端旧 —— 确定的话才选' },
+        ]),
       }).then(function (v) {
         if (v === 'push') return doPush(true);
         if (v === 'pull') return doPull(r.data);

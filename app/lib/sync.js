@@ -147,6 +147,19 @@ var Sync = (function () {
     var payload = Store.exportAll();
     var text = JSON.stringify(payload, null, 1);
 
+    // ⚠️ **本机一期都没有,绝不自动推。**
+    //    这条防的是一个会当场毁数据的场景:在新设备(手机)上填完 token,
+    //    保存配置本身就是一次 Store.set → 打脏标记 → 4 秒后自动推 ——
+    //    而这时本机还是空的,于是云端那几年的历史被 0 期覆盖,
+    //    **在你还没来得及点「立刻同步」之前**。
+    //    空数据盖掉非空的云端,没有任何一种情况下是用户想要的。
+    //    真要清空(比如就是想重来),那是 force 路径,得你亲手选。
+    var snaps = (payload.data && payload.data.snapshots) || [];
+    if (!snaps.length && !(opts || {}).force) {
+      return Promise.resolve({ ok: false, empty: true,
+                               why: '本机还没有数据 —— 不能拿空的去盖云端' });
+    }
+
     // 先拿最新的 sha —— 本地记的那个可能已经过期(另一台设备推过)。
     // ⚠️ 这一步**不能省**。省了的话每次都用本地缓存的 sha,
     //    而它一旦过期,写入永远 409,同步从此静静地失败。

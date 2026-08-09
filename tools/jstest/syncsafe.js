@@ -10,9 +10,20 @@ var A = path.join(__dirname, '..', '..', 'app');
 var mem = {};
 var pushed = [];          // 记录每次「真的发出去了」的内容
 
+// ⚠️ 和 lib/store.js 里那份**必须一致**。对不上的话，
+//    要么漏测某个 key，要么测到一个线上不存在的路径。
+var SYNCED = { settings: 1, snapshots: 1, assets: 1, todos: 1, flows: 1, prefs: 1 };
+
 global.Store = {
   get: function (k, d) { return mem[k] === undefined ? d : mem[k]; },
-  set: function (k, v) { mem[k] = v; },
+  // ⚠️ **桩必须复刻真实 Store.set 的行为**,包括那句 markDirty。
+  //    少了它,「拉完会不会反手推」这条测的就是个空气 ——
+  //    把 sync.js 里的 quiet 判断整行删掉,测试照样全绿。
+  //    桩和实现行为不一致的时候,测试不是没测到,是**在证明一件假事**。
+  set: function (k, v) {
+    mem[k] = v;
+    if (SYNCED[k] && typeof Sync !== 'undefined') Sync.markDirty();
+  },
   exportAll: function () {
     return { version: 1, exportedAt: '2026-08-10T00:00:00Z',
              data: { snapshots: mem.snapshots || [] } };
@@ -23,6 +34,15 @@ global.Store = {
     return { ok: true, summary: { snapshots: s.length,
              first: s.length ? s[0].date : null,
              last: s.length ? s[s.length - 1].date : null } };
+  },
+  saveRollback: function (reason) { mem.__rollback = reason; },
+  // ⚠️ 桩里也要**真的走 Store.set** —— 那正是会触发 markDirty 的路径。
+  //    如果这里直接改 mem,「拉完反手推回去」这个 bug 就测不出来,
+  //    而它恰恰是自动同步最容易长出来的一个。
+  importAll: function (o) {
+    var self = global.Store;
+    Object.keys(o.data || {}).forEach(function (k) { self.set(k, o.data[k]); });
+    return { ok: true };
   },
 };
 
@@ -54,12 +74,22 @@ global.TextDecoder = require('util').TextDecoder;
 global.btoa = function (s) { return Buffer.from(s, 'binary').toString('base64'); };
 global.atob = function (s) { return Buffer.from(s, 'base64').toString('binary'); };
 
+// ⚠️ 拦下 setTimeout —— 自动推是**延迟 4 秒**发生的,测试早就 exit 了。
+//    只看 pushed 的话,「有没有安排推送」这件事根本测不到。
+var scheduled = 0;
+var realTimeout = global.setTimeout;
+global.setTimeout = function (fn, ms) {
+  if (ms === 4000) { scheduled++; return 0; }   // 那是自动推的防抖
+  return realTimeout(fn, ms);
+};
+
 var Sync = require(path.join(A, 'lib', 'sync.js'));
 
 var fail = 0;
 function ok(c, m) { if (!c) { console.log('  FAIL ' + m); fail++; } }
 
 function reset(localSnaps, remoteSnaps) {
+  scheduled = 0;
   mem = { sync: { owner: 'me', repo: 'data', token: 't' } };
   mem.snapshots = localSnaps;
   pushed = [];
@@ -110,7 +140,43 @@ Sync.push({}).then(function (r) {
   var auto = src.slice(src.indexOf('function markDirty'), src.indexOf('function clearDirty'));
   ok(auto.indexOf('force') < 0, '★ 自动推的代码里不许出现 force');
 
+  // ---- 5. ★ 开机自动拉:只在绝对安全时拉 ----
+  //
+  // ⚠️ 「安全」= 本机没有未推送的改动。那意味着本机每一笔都已经在云端,
+  //    云端只可能比本机新或一样新,拉下来不会丢东西。
+  //    dirty 时两边都有对方没有的东西 —— 自动选一边就是赌,
+  //    而赌输的表现是「我明明录过那一期」。
+  reset(SNAP, [{ date: '2026-07-30' }, { date: '2026-08-31' }, { date: '2026-09-30' }]);
+  mem.sync.dirty = true;
+  return Sync.autoPull();
+}).then(function (a1) {
+  ok(a1.skipped, '★ 本机有未推送的改动时,绝不自动拉');
+
+  // 本机干净 + 云端更新 → 拉
+  reset([{ date: '2026-07-30' }], [{ date: '2026-07-30' }, { date: '2026-08-31' }]);
+  return Sync.autoPull();
+}).then(function (a2) {
+  ok(a2.pulled, '本机干净、云端更新 → 拉下来');
+  ok((mem.snapshots || []).length === 2, '拉完本机应该有 2 期,实际 ' +
+     (mem.snapshots || []).length);
+  ok(mem.sync.dirty === false, '★ 拉进来的写入不算「你改的」,dirty 要是假');
+  // ⚠️ **不能只看 pushed 是不是空的。** 自动推有 4 秒防抖,
+  //    测试跑完早就 exit 了,`pushed.length === 0` 无论如何都成立 ——
+  //    那条断言从写下来就是装饰(把 quiet 那行注释掉,它照样绿)。
+  //    要测的是**有没有安排推送**,所以查 setTimeout 被调用了没。
+  ok(scheduled === 0,
+     '★ 拉完不许安排推送 —— 那是把刚拉下来的原样推回去,白多一个 commit' +
+     '(实际安排了 ' + scheduled + ' 次)');
+
+  // ★ 云端比本机旧 → 别拉(推送记录丢了的情况)
+  reset([{ date: '2026-07-30' }, { date: '2026-09-30' }], [{ date: '2026-07-30' }]);
+  return Sync.autoPull();
+}).then(function (a3) {
+  ok(a3.skipped, '★ 云端比本机旧时不许拉 —— 那会把新的换成旧的');
+  ok((mem.snapshots || []).length === 2, '本机那两期一个都不能少');
+
   console.log(fail ? '  同步安全 ' + fail + ' 条没过'
-                   : '  同步安全 ok(空的不推 · 冲突不盖 · 自动推不 force)');
+                   : '  同步安全 ok(空的不推 · 冲突不盖 · 自动推不 force · ' +
+                     '脏了不拉 · 拉完不反手推)');
   process.exit(fail ? 1 : 0);
 });

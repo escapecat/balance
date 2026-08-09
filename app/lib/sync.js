@@ -266,6 +266,44 @@ var Sync = (function () {
     return { state: 'idle', text: '还没推过' };
   }
 
+  /** 开机自动拉 —— **只在绝对安全的时候拉,其余一律不动。**
+   *
+   *  安全的定义:本机没有任何未推送的改动(dirty 为假)。
+   *  那意味着本机的每一笔都已经在云端了,所以云端只可能比本机新或一样新,
+   *  拉下来不会丢东西。
+   *
+   *  ⚠️ **dirty 时绝不拉。** 那时候两边都有对方没有的东西,
+   *     谁覆盖谁是个需要你看着数字决定的问题 —— 自动选一个就是赌,
+   *     而赌输的表现是「我明明录过那一期」。这种情况留给「立刻同步」去问。
+   *
+   *  ⚠️ sha 相同就什么都不做,连解析都省了 —— 每次开 app 都整份导入一遍的话,
+   *     Store 会被写一遍,又触发 markDirty,又推一次,循环起来了。
+   *
+   *  @return {pulled:true} 拉了 | {same:true} 云端没变 | {skipped:true} 有本地改动
+   */
+  function autoPull() {
+    if (!ready()) return Promise.resolve({ skipped: true, why: '没开同步' });
+    if (cfg().dirty) return Promise.resolve({ skipped: true, why: '本机还有没推上去的改动' });
+    return pull().then(function (r) {
+      if (r.empty) return { same: true, why: '云端还没有数据' };
+      if (!r.ok) return { skipped: true, why: r.why };
+      if (r.sha && r.sha === cfg().sha) return { same: true };
+
+      var mine = Store.inspectImport(Store.exportAll());
+      // ⚠️ 云端比本机**旧**的时候也别拉 —— 那说明本机的推送记录丢了
+      //    (换过浏览器、清过 sync 配置),这时拉就是把新的换成旧的。
+      if (mine.ok && mine.summary.last && r.summary.last &&
+          mine.summary.last > r.summary.last) {
+        return { skipped: true, why: '本机比云端新 —— 去「立刻同步」推上去' };
+      }
+      Store.saveRollback('开机从云端拉取之前');
+      var imp = silently(function () { return Store.importAll(r.data); });
+      if (!imp.ok) return { skipped: true, why: imp.why };
+      saveCfg({ sha: r.sha, dirty: false });
+      return { pulled: true, summary: r.summary };
+    });
+  }
+
   /** 数据变了 —— 打个记号,并**安排一次自动推送**(防抖 4 秒)。
    *
    *  ⚠️ 不立刻推:一次录入会连着写好几个 key(snapshots / todos / flows),
@@ -280,7 +318,21 @@ var Sync = (function () {
    *     盖掉另一台设备的数据 —— 那种丢失查都没法查。
    */
   var timer = null;
+  var quiet = false;      // 正在往本地灌云端数据 —— 这期间的写入不算「你改的」
+
+  /** 期间的所有写入都不打脏标记。
+   *
+   *  ⚠️ 没有这一层的话会自噬:从云端拉一份 → Store.importAll 内部
+   *     写六七个 key → 每个都 markDirty → 4 秒后把刚拉下来的原样推回去。
+   *     一次开机就多一个毫无内容的 commit,而且每台设备开机都来一遍。
+   */
+  function silently(fn) {
+    quiet = true;
+    try { return fn(); } finally { quiet = false; }
+  }
+
   function markDirty() {
+    if (quiet) return;
     saveCfg({ dirty: true });
     if (!ready() || typeof setTimeout === 'undefined') return;
     if (timer) clearTimeout(timer);
@@ -308,6 +360,7 @@ var Sync = (function () {
   return { cfg: cfg, saveCfg: saveCfg, ready: ready, check: check,
            pull: pull, push: push, history: history, at: at,
            status: status, markDirty: markDirty, clearDirty: clearDirty, flush: flush,
+           autoPull: autoPull, silently: silently,
            toB64: toB64, fromB64: fromB64 };
 })();
 

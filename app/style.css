@@ -217,30 +217,27 @@ body {
 /* ⚠️ **这条 flex 链条不涉及任何数值** —— 这正是它和今晚那些补丁的区别。
      `flex: 1 0 auto` 而不是 `1`:内容比容器长时不许被压缩，
      那种情况下该滚动，不该把内容挤扁。 */
+/* ⚠️ **一处定义，别分两条写。** 分开写属性虽然会合并，
+   但下一次有人只改其中一条，另一条还在，排查起来要命。 */
 .wrap {
+  max-width: 560px;
+  margin: 0 auto;
+  padding: var(--s4);
+  /* ⚠️ **width:100% 不能少。**
+     `margin: 0 auto` 在普通块级布局下是居中，但 .wrap 现在是 flex item ——
+     CSS 规范里 flex item 在交叉轴上有 auto margin 时，stretch 会被禁用，
+     宽度退回按内容算。表现是整个页面突然变窄（有多少字占多宽）。 */
+  width: 100%;
+  /* flex:1 0 auto 让它至少撑满 .page —— 这样底色是连续的一整块，
+     而不是「内容那一截有底色，下面是另一块」。
+     ⚠️ 不再往里传 flex（不再有 .fill-rest），所以这里也不设 display:flex。 */
   flex: 1 0 auto;
-  display: flex;
-  flex-direction: column;
 }
-/* 链条的最后一环:内容里最后一块容器吃掉剩下的空间。
-   由 app.js 渲染完盖上这个 class —— 好几页的末尾是按钮或提示文字，
-   拉伸它们会拉出一个巨高的按钮，所以要挑「真正排在最后的那块容器」。 */
-.fill-rest {
-  flex: 1 0 auto;
-  /* ⚠️ 只有**真的排在最后**时才抵消 .wrap 的下内边距。
-     后面还跟着按钮的话，负边距会把按钮往上顶进列表里。 */
-}
-.fill-rest:last-child {
-  margin-bottom: calc(var(--s4) * -1);
-  border-bottom-left-radius: 0;
-  border-bottom-right-radius: 0;
-}
-.fill-rest:last-child > :last-child {
-  border-bottom-left-radius: 0 !important;
-  border-bottom-right-radius: 0 !important;
-}
+/* ⚠️ 这里**曾经有 .fill-rest**，用来把最后一块列表拉长、填掉底部空白。
+   撤掉了 —— 它把一部分页面的按钮推到了屏幕最底下，而那种「内容在上、
+   按钮孤零零沉在底」的排布，比原来那点空白更难看。
+   底部露出的背景已经和卡片同色，本来就看不出断层。 */
 
-.wrap { max-width: 560px; margin: 0 auto; padding: var(--s4); }
 
 h1 { font-size: var(--t-lg); font-weight: 650; margin: var(--s1) 0 var(--s1);
      letter-spacing: -.01em; }
@@ -771,7 +768,9 @@ h2 .n { color: var(--text-dim2); font-weight: 500; margin-left: var(--s1);
 /* ---- 空状态:别只放个图标 ---- */
 .empty { padding: var(--s6) var(--s4); }
 .empty .big { font-size: 30px; opacity: .35; margin-bottom: var(--s3); }
-.empty .hint { max-width: 26em; margin-left: auto; margin-right: auto; }
+/* ⚠️ 和 .wrap 同一个坑:auto margin 会关掉 flex item 的 stretch，
+   宽度退回按内容算。加 width:100% 兜住。 */
+.empty .hint { max-width: 26em; width: 100%; margin-left: auto; margin-right: auto; }
 
 /* ============================================================
    图表交互

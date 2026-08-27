@@ -500,8 +500,14 @@ var SettingsUI = (function () {
     // ⚠️ 覆盖本机之前**先存回滚点**。这是唯一一个会一次性
     //    抹掉全部本地数据的操作,没有后路是不行的。
     Store.saveRollback('从云端拉取之前');
-    var r = Store.importAll(data);
-    if (!r.ok) { Modal.note({ title: '导入失败', body: r.why }); return; }
+    // importAll 成功时直接返回 summary,失败时抛异常。
+    // 把 summary 当成 {ok:true} 会导致一个很骗人的状态:
+    // 数据其实已经写入,界面却每次都说「导入失败」。
+    try { Store.importAll(data); }
+    catch (e) {
+      Modal.note({ title: '导入失败', body: e.message || String(e) });
+      return;
+    }
     Sync.clearDirty();
     if (onChanged) onChanged();
     Modal.note({ title: '拉下来了', body: '本机已经换成云端那份。后悔了去「退回」。' });

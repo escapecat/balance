@@ -351,8 +351,33 @@ var EntryUI = (function () {
       return lateActions(built.snapshot);
     }).then(function (ok) {
       if (ok === undefined || ok === false) return;
-      Ledger.commit(built.snapshot);
+      return confirmBoundary(built.snapshot);
+    }).then(function (ok) {
+      if (!ok) return;
+      try { Ledger.commit(built.snapshot); }
+      catch (e) { Modal.note({ title: '没有保存', body: e.message }); return; }
       if (onDone) onDone(true);
+    });
+  }
+
+  function confirmBoundary(snap) {
+    var old = snapshots().filter(function (s) { return s.date === snap.date; })[0];
+    var pending = old ? Actions.between(old, null).filter(function (f) {
+      return f.date === snap.date && Actions.MONEY[f.kind];
+    }) : [];
+    if (!pending.length) return Promise.resolve(true);
+    return Modal.pick({
+      title: '这次余额包含今天盘点后的买卖吗?',
+      hint: '今天上次盘点后又记了 ' + pending.length + ' 笔。只有现金扣款和持仓都已反映在这次填写的余额里,才选「已包含」。不要手工重复加减。',
+      options: [
+        { key: 'after', label: '已包含全部买卖', hint: '用这次余额完成对账' },
+        { key: 'before', label: '仍是这些买卖之前的余额', hint: '只修正原盘点,买卖继续待对账' },
+        { key: 'cancel', label: '只有部分到账,先不保存', hint: '等现金和持仓都能完整对上再录' },
+      ],
+    }).then(function (v) {
+      if (!v || v === 'cancel') return false;
+      snap.actionIds = v === 'after' ? Actions.capture(snap.date) : (old.actionIds || []).slice();
+      return true;
     });
   }
 
@@ -393,7 +418,10 @@ var EntryUI = (function () {
       ],
     }).then(function (v) {
       if (!v) return false;
-      if (v === 'fix') { snap.date = late[late.length - 1].date; }
+      if (v === 'fix') {
+        snap.date = late[late.length - 1].date;
+        snap.actionIds = Actions.capture(snap.date);
+      }
       return true;
     });
   }

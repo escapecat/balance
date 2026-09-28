@@ -63,6 +63,12 @@ var Ledger = (function () {
     }
     fill('holdings'); fill('cash'); fill('external');
 
+    if (typeof Actions !== 'undefined') {
+      // 同日修正余额不等于确认后续交易已到账;保存时由录入页明确询问。
+      out.actionIds = prev.date === date && Array.isArray(prev.actionIds)
+        ? prev.actionIds.slice() : Actions.capture(date);
+    }
+
     var ni = parse(raw.netInflow);
     // 净投入**可以是负的**(取钱出来),这是它和持仓的关键区别
     out.netInflow = (ni === EMPTY) ? 0 : ni;
@@ -125,8 +131,8 @@ var Ledger = (function () {
     // ⚠️ 分红那一项漏了的话,它会被算成「基金亏了这么多 + 工资多了这么多」——
     //    两个数同时错,方向相反,而总额完全对得上,所以查不出来。
     if (typeof Actions !== 'undefined' && Actions.covered(prev.date)) {
-      var nb = Actions.netBuy(prev.date, snap.date).total;
-      var dv = Actions.dividends(prev.date, snap.date).total;
+      var nb = Actions.netBuy(prev, snap).total;
+      var dv = Actions.dividends(prev, snap).total;
       var dCash = Portfolio.sum(snap.cash) - Portfolio.sum(prev.cash);
       var dHeld = Portfolio.sum(snap.holdings) - Portfolio.sum(prev.holdings);
       return { total: t, change: t - p,
@@ -157,8 +163,8 @@ var Ledger = (function () {
   function perFund(snap, prev) {
     if (!prev) return null;
     if (typeof Actions === 'undefined' || !Actions.covered(prev.date)) return null;
-    var by = Actions.netBuy(prev.date, snap.date).byCode;
-    var dv = Actions.dividends(prev.date, snap.date).byCode;
+    var by = Actions.netBuy(prev, snap).byCode;
+    var dv = Actions.dividends(prev, snap).byCode;
     var codes = {};
     Object.keys(snap.holdings || {}).forEach(function (c) { codes[c] = 1; });
     Object.keys(prev.holdings || {}).forEach(function (c) { codes[c] = 1; });
@@ -187,7 +193,12 @@ var Ledger = (function () {
   //    界面以后可能重写,业务不该跟着写第二遍。
 
   function commit(snap) {
-    Store.set('snapshots', append(Store.get('snapshots', []) || [], snap));
+    if (!Array.isArray(snap.actionIds) && typeof Actions !== 'undefined') {
+      snap = Object.assign({}, snap, { actionIds: Actions.capture(snap.date) });
+    }
+    if (Store.set('snapshots', append(Store.get('snapshots', []) || [], snap)) === false) {
+      throw new Error('余额保存失败,请先导出备份并检查存储空间');
+    }
     Store.remove('draft');            // 存成功了草稿就该消失,不然下次进来还问你要不要续
     return snap;
   }

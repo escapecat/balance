@@ -125,6 +125,9 @@ near(comp[1].pct['现金'], 0, 1e-9, '现金花完了应该是 0');
 near(comp[1].pct['股'], 0.75, 1e-9, '股的占比算错');
 
 // ---- 8. 各类贡献:没有分类流水就不给 ----
+// 分类贡献与主账本共享 Actions 的盘点边界;上面的手填收益夹具仍不加载它。
+global.Store = { get: function (k, fallback) { return fallback; } };
+global.Actions = require(path.join(A, 'core', 'actions.js'));
 var noFlow = Stats.contribution(
   [{ date: '2026-01-01', holdings: { S1: 100000 }, cash: {} },
    { date: '2026-02-01', holdings: { S1: 150000 }, cash: {} }], [], S);

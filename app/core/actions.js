@@ -57,6 +57,9 @@ var Actions = (function () {
   function newId(list) {
     var n = 1, used = {};
     (list || []).forEach(function (f) { used[f.id] = 1; });
+    (Store.get('snapshots', []) || []).forEach(function (s) {
+      (s.actionIds || []).forEach(function (id) { used[id] = 1; });
+    });
     while (used['f' + n]) n++;
     return 'f' + n;
   }
@@ -80,14 +83,30 @@ var Actions = (function () {
     if (MONEY[a.kind]) rec.amount = a.amount;
     if (a.note) rec.note = a.note;
     if (a.todoId) rec.todoId = a.todoId;
+    if (a.planDate) rec.planDate = a.planDate;
+    var snaps = Store.get('snapshots', []) || [];
+    var last = snaps.length ? snaps[snaps.length - 1] : null;
+    if (last && last.date <= a.date) rec.afterSnapshot = last.date;
     list.push(rec);
     list.sort(function (x, y) { return x.date < y.date ? -1 : x.date > y.date ? 1 : 0; });
-    Store.set('flows', list);
+    if (Store.set('flows', list) === false) return { ok: false, why: '买卖记录保存失败' };
     return { ok: true, id: rec.id };
   }
 
   function remove(id) {
     Store.set('flows', all().filter(function (f) { return f.id !== id; }));
+  }
+
+  // 改金额不是再次成交:保留 id、实际日期和对账边界。
+  function updateAmount(id, amount) {
+    if (typeof amount !== 'number' || !isFinite(amount) || amount <= 0) {
+      return { ok: false, why: '金额得是个大于 0 的数' };
+    }
+    var list = all().slice(), i = list.findIndex(function (f) { return f.id === id; });
+    if (i < 0) return { ok: false, why: '没有这笔买卖' };
+    list[i] = Object.assign({}, list[i], { amount: amount });
+    if (Store.set('flows', list) === false) return { ok: false, why: '买卖记录保存失败' };
+    return { ok: true, id: id };
   }
 
   /** 从哪天开始,买卖就都记全了。**在这之前的区间一律算「没有记录」** ——
@@ -116,10 +135,30 @@ var Actions = (function () {
   /** 还没声明过起点。界面靠这个决定要不要问那一句。 */
   function needsStart() { return !since(); }
 
-  /** (from, to] 区间内的动作。左开右闭 —— 对账日当天的买入算这一期的。 */
-  function between(from, to) {
-    return all().filter(function (f) {
-      return (!from || f.date > from) && (!to || f.date <= to);
+  function boundary(value) {
+    if (!value || typeof value === 'object') return value;
+    return (Store.get('snapshots', []) || []).filter(function (s) {
+      return s.date === value;
+    })[0] || { date: value };
+  }
+
+  /** 快照只包含盘点时已经反映在余额里的交易。同一天不能只比较日期。 */
+  function included(f, value) {
+    var s = boundary(value);
+    if (!s) return false;
+    if (f.date !== s.date) return f.date < s.date;
+    if (Array.isArray(s.actionIds)) return s.actionIds.indexOf(f.id) >= 0;
+    return f.afterSnapshot !== s.date;   // 未升级的旧日期查询保持原口径
+  }
+
+  function capture(date) {
+    return all().filter(function (f) { return f.date === date; }).map(function (f) { return f.id; });
+  }
+
+  /** 两次盘点之间的动作;首页待对账、收益、逐只收益、统计都用这一处。 */
+  function between(from, to, records) {
+    return (records || all()).filter(function (f) {
+      return (!from || !included(f, from)) && (!to || included(f, to));
     });
   }
 
@@ -166,6 +205,7 @@ var Actions = (function () {
   }
 
   return { MONEY: MONEY, all: all, add: add, remove: remove, newId: newId,
+           updateAmount: updateAmount, included: included, capture: capture,
            since: since, startFrom: startFrom, needsStart: needsStart, between: between,
            covered: covered, netBuy: netBuy, dividends: dividends,
            netByCategory: netByCategory };

@@ -55,7 +55,7 @@ var b1b = Store.boot();
 ok(b1b.ok, '★ 老数据(没有 __meta)被挡住了:' + (b1b.why || ''));
 ok(Store.get('snapshots').length === 2, '老数据还在');
 ok(Store.get('__meta').schema === Store.SCHEMA, '顺手补盖了版本号');
-ok(!Store.getRollback(), '这种情况不该留回滚点 —— 什么都没改');
+ok(Store.getRollback() && Store.getRollback().version === 1, '旧版本升级必须保留 v1 回滚点');
 
 // ---- 2. ★ 数据比代码新 → 拒绝启动 ----
 //
@@ -81,7 +81,7 @@ ok(Store.get('snapshots').length === 1, '★ 数据必须原封不动');
 reset();
 seed(['2026-05-11', '2026-06-11', '2026-07-11']);
 Store.boot();
-ok(!Store.getRollback(), '一开始没有回滚点');
+ok(Store.getRollback(), '升级前留有回滚点');
 
 var incoming = { version: 1, data: {
   snapshots: [{ date: '2020-01-01', holdings: { A: 1 }, cash: {} }],

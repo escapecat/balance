@@ -169,13 +169,14 @@ var Stats = (function () {
    *     `market` 是 null —— 界面上写「未知」,不许拿总额倒推。 */
   function contribution(snaps, flows, settings) {
     if (!snaps || snaps.length < 2) return { ok: false, why: '至少要两期' };
-    var first = null;
-    (flows || []).forEach(function (f) { if (!first || f.date < first) first = f.date; });
-    if (!first) return { ok: false, why: '还没有勾过任何一条待办 —— 分类流水从第一次勾选开始' };
+    var records = (flows || []).filter(function (f) { return Actions.MONEY[f.kind]; });
+    if (!records.length) return { ok: false, why: '还没有勾过任何一条待办 —— 分类流水从第一次勾选开始' };
 
     // 起点取「第一条流水之前的最后一期」,再早的没有流水可对照
     var start = null;
-    snaps.forEach(function (s) { if (s.date <= first) start = s; });
+    snaps.forEach(function (s) {
+      if (!records.some(function (f) { return Actions.included(f, s); })) start = s;
+    });
     if (!start) start = snaps[0];
     var end = snaps[snaps.length - 1];
     if (start.date === end.date) return { ok: false, why: '第一次勾选之后还没录过新的一期' };
@@ -184,9 +185,9 @@ var Stats = (function () {
     var a = Portfolio.byCategory(start.holdings, funds);
     var b = Portfolio.byCategory(end.holdings, funds);
     var inflow = {};
-    (flows || []).forEach(function (f) {
-      if (f.date <= start.date) return;
-      inflow[f.category] = (inflow[f.category] || 0) + (f.kind === 'sell' ? -1 : 1) * f.amount;
+    Actions.between(start, end, flows || []).forEach(function (f) {
+      if (!Actions.MONEY[f.kind]) return;
+      inflow[f.category] = (inflow[f.category] || 0) + (f.kind === 'buy' ? 1 : -1) * f.amount;
     });
 
     var rows = [];

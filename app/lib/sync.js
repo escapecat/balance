@@ -297,8 +297,8 @@ var Sync = (function () {
         return { skipped: true, why: '本机比云端新 —— 去「立刻同步」推上去' };
       }
       Store.saveRollback('开机从云端拉取之前');
-      var imp = silently(function () { return Store.importAll(r.data); });
-      if (!imp.ok) return { skipped: true, why: imp.why };
+      try { silently(function () { Store.importAll(r.data); }); }
+      catch (e) { return { skipped: true, why: e.message }; }
       saveCfg({ sha: r.sha, dirty: false });
       return { pulled: true, summary: r.summary };
     });

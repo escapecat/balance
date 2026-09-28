@@ -141,27 +141,28 @@ var Todos = (function () {
     }
     if (amount <= 0) return { ok: false, why: '金额得大于 0;真没做就用「不做了」' };
 
+    var previous = currentFlows(t);
+    var result = previous.length
+      ? Actions.updateAmount(previous[0].id, amount)
+      : Actions.add({ date: today, kind: t.kind, category: t.category,
+                      code: t.code, amount: amount, todoId: t.id, planDate: t.lastSnap });
+    if (!result.ok) return result;
     t.actual = amount;
-    t.doneAt = today;
+    t.doneAt = previous.length ? previous[0].date : today;
     t.status = amount + 1 < t.target ? 'partial' : 'done';
 
     Store.set('todos', list);
 
-    // ⚠️ **先删掉这条待办以前写的流水,再写新的。**
-    //    早先是无脑 append,于是「改金额」(界面上再勾一次)变成了追加:
-    //    买了两万六记一条、改成两万六千四又记一条,净买入直接翻倍,
-    //    而待办上只显示最后那个金额 —— 清单看着完全正常,
-    //    收益率却按双倍的投入算,**分母错了所有收益率都错**。
-    //
-    //    语义上也该这样:一条待办对应「你为这件事做的那一笔」,
-    //    改金额是修正同一笔,不是又买了一次。真的又买了一次,
-    //    那是清单外的第二笔,走「记一笔买卖」。
-    Actions.all().slice().forEach(function (f) {
-      if (f.todoId === t.id) Actions.remove(f.id);
-    });
-    appendFlow({ date: today, kind: t.kind, category: t.category,
-                 code: t.code, amount: amount, todoId: t.id });
+    // 稳定 todo id 会跨月复用,绝不能因此删除上一轮真实买卖。
     return { ok: true, status: t.status };
+  }
+
+  function currentFlows(t) {
+    return Actions.all().filter(function (f) {
+      return f.todoId === t.id && (f.planDate
+        ? f.planDate === t.lastSnap
+        : !!t.doneAt && f.date === t.doneAt && f.date >= t.lastSnap);
+    });
   }
 
   /** 「不做了」—— 体面的出口。
@@ -193,8 +194,8 @@ var Todos = (function () {
     var t = list.filter(function (x) { return x.id === id; })[0];
     if (!t) return { ok: false, why: '没有这条待办' };
     var gone = 0;
-    Actions.all().slice().forEach(function (f) {
-      if (f.todoId === id) { Actions.remove(f.id); gone++; }
+    currentFlows(t).forEach(function (f) {
+      Actions.remove(f.id); gone++;
     });
     t.status = 'open';
     t.actual = null;

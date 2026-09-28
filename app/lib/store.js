@@ -20,12 +20,31 @@ var Store = (function () {
   //    读到 undefined,当成「这项没填」照样往下算,数字全变但一个错都不报。
   //    而代码是自动更新的(GitHub Pages + Service Worker)——
   //    你某天打开发现总额不对,根本想不到是三天前我改了个字段名。
-  var SCHEMA = 1;
+  var SCHEMA = 2;
 
   // 版本 n → n+1 的升级函数。**只往前,不回退。**
   // 每条都要能重复跑而结果不变(万一中途失败重来一次)。
   var MIGRATE = {
-    // 1: function (data) { ... return data; },
+    1: function (data) {
+      var flows = data.flows || [], todos = data.todos || [];
+      flows.forEach(function (f) {
+        var t = todos.filter(function (x) {
+          return x.id === f.todoId && x.doneAt === f.date && x.actual === f.amount &&
+                 (x.status === 'done' || x.status === 'partial');
+        })[0];
+        if (!t) return;
+        if (!f.planDate) f.planDate = t.lastSnap;
+        // 同日盘点生成的 todo 在盘点后执行;不改实际成交日、金额、id。
+        if (!f.afterSnapshot && t.lastSnap === f.date) f.afterSnapshot = t.lastSnap;
+      });
+      (data.snapshots || []).forEach(function (s) {
+        if (Array.isArray(s.actionIds)) return;  // 重跑不覆盖已确认的同日边界
+        s.actionIds = flows.filter(function (f) {
+          return f.date === s.date && f.afterSnapshot !== s.date;
+        }).map(function (f) { return f.id; });
+      });
+      return data;
+    },
   };
 
   // 所有会被导出/导入的键。加了新键**必须加进来**,
@@ -100,15 +119,17 @@ var Store = (function () {
       var v = get(k, undefined);
       if (v !== null && v !== undefined) data[k] = v;
     });
-    return { version: 1, exportedAt: new Date().toISOString(), data: data };
+    var meta = get(META, null);
+    return { version: meta ? meta.schema : 1, exportedAt: new Date().toISOString(), data: data };
   }
 
   /** 只看不写 —— 覆盖之前得先让人看清要盖掉什么。
    *  @return {ok:true, summary} | {ok:false, why} */
   function inspectImport(obj) {
     if (!obj || typeof obj !== 'object') return { ok: false, why: '这不是一份备份文件' };
-    if (typeof obj.version !== 'number') return { ok: false, why: '缺 version,认不出是哪个版本的备份' };
-    if (obj.version > 1) return { ok: false, why: '这份备份比当前版本还新(v' + obj.version + ')' };
+    if (typeof obj.version !== 'number' || !isFinite(obj.version)) return { ok: false, why: '缺有效 version,认不出是哪个版本的备份' };
+    if (obj.version > SCHEMA) return { ok: false, why: '这份备份比当前版本还新(v' + obj.version + '),请刷新到新版' };
+    if (obj.version < 1 || obj.version % 1) return { ok: false, why: '不支持这个备份版本' };
     if (!obj.data || typeof obj.data !== 'object') return { ok: false, why: '缺 data' };
 
     for (var i = 0; i < MUST_ARRAY.length; i++) {
@@ -118,6 +139,9 @@ var Store = (function () {
       }
     }
     var snaps = obj.data.snapshots || [];
+    if (obj.version >= 2 && snaps.some(function (s) {
+      return !s || !Array.isArray(s.actionIds) || s.actionIds.some(function (id) { return typeof id !== 'string'; });
+    })) return { ok: false, why: '缺少同日交易的对账边界,不能安全导入' };
     return {
       ok: true,
       summary: {
@@ -139,12 +163,36 @@ var Store = (function () {
     // ⚠️ 导入是唯一不可撤销的写操作 —— **动手之前先留一个回滚点**。
     //    界面上已经会问一遍「确定要覆盖吗」,但那问的是意图,
     //    答不了「导进来才发现是三个月前那份」。
-    saveRollback('导入备份之前');
-    KEYS.forEach(function (k) {
-      if (obj.data[k] !== undefined) set(k, obj.data[k]);
-    });
-    set(META, { schema: SCHEMA });
+    replaceData(upgrade(obj.data, obj.version), '导入备份之前');
     return chk.summary;
+  }
+
+  function upgrade(data, found) {
+    var next = JSON.parse(JSON.stringify(data));
+    for (var v = found; v < SCHEMA; v++) {
+      if (!MIGRATE[v]) throw new Error('缺 v' + v + ' → v' + (v + 1) + ' 的升级步骤');
+      next = MIGRATE[v](next);
+    }
+    return next;
+  }
+
+  // 迁移/导入/回滚共用写入边界。备份失败不开始,中途失败恢复旧键和版本号。
+  function replaceData(data, reason) {
+    var previous = {};
+    KEYS.concat([META, 'sync']).forEach(function (k) { previous[k] = raw(k); });
+    if (!saveRollback(reason)) throw new Error('无法保存回滚点,数据未改动');
+    try {
+      KEYS.forEach(function (k) {
+        if (data[k] !== undefined && !set(k, data[k])) throw new Error('保存 ' + k + ' 失败');
+      });
+      if (!set(META, { schema: SCHEMA })) throw new Error('保存版本号失败');
+    } catch (e) {
+      Object.keys(previous).forEach(function (k) {
+        if (previous[k] === null) localStorage.removeItem(NS + k);
+        else localStorage.setItem(NS + k, previous[k]);
+      });
+      throw e;
+    }
   }
 
   function clearAll() { keys().forEach(remove); }
@@ -194,28 +242,16 @@ var Store = (function () {
       return { ok: true, migrated: [] };
     }
 
-    // 要升级 —— **先留回滚点**,再动数据
-    saveRollback('升级到 v' + SCHEMA + ' 之前');
     var done = [];
-    for (var v = found; v < SCHEMA; v++) {
-      var fn = MIGRATE[v];
-      if (!fn) {
-        return { ok: false, found: found, expect: SCHEMA,
-                 why: '缺 v' + v + ' → v' + (v + 1) + ' 的升级步骤,不敢往下走。' +
-                      '你的数据没有被改动。' };
-      }
-      var data = {};
-      KEYS.forEach(function (k) { data[k] = get(k, undefined); });
-      var next;
-      try { next = fn(data); } catch (e) {
-        return { ok: false, found: found, expect: SCHEMA,
-                 why: '升级到 v' + (v + 1) + ' 时出错:' + e.message +
-                      '。你的数据没有被改动。' };
-      }
-      KEYS.forEach(function (k) { if (next[k] !== undefined) set(k, next[k]); });
-      done.push(v + '→' + (v + 1));
+    try {
+      if (found < 1 || found % 1) throw new Error('不支持的数据版本');
+      var data = exportAll().data;
+      replaceData(upgrade(data, found), '升级到 v' + SCHEMA + ' 之前');
+      for (var v = found; v < SCHEMA; v++) done.push(v + '→' + (v + 1));
+    } catch (e) {
+      return { ok: false, found: found, expect: SCHEMA,
+               why: '升级失败:' + e.message + '。请先导出备份,不要继续录入。' };
     }
-    set(META, { schema: SCHEMA });
     return { ok: true, migrated: done };
   }
 
@@ -237,13 +273,8 @@ var Store = (function () {
     if (!prev) return { ok: false, why: '没有可回滚的状态' };
     var chk = inspectImport(prev);
     if (!chk.ok) return { ok: false, why: '回滚点本身坏了:' + chk.why };
-    var current = exportAll();
-    current.reason = '回滚之前的状态';
-    current.savedAt = new Date().toISOString();
-    KEYS.forEach(function (k) {
-      if (prev.data[k] !== undefined) set(k, prev.data[k]);
-    });
-    set(ROLLBACK, current);
+    try { replaceData(upgrade(prev.data, prev.version), '回滚之前的状态'); }
+    catch (e) { return { ok: false, why: e.message }; }
     return { ok: true, summary: chk.summary };
   }
 

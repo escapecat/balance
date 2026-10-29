@@ -13,7 +13,7 @@ var Config = (function () {
   var DEFAULTS = {
     targets: {}, funds: [], retired: [], locked: [],
     cashFloor: 0, cashTarget: 0.05, band: 0.05, minBuy: 1000,
-    reviewPolicy: { annualDate: '', halfEnabled: true }, buyFundByCategory: {},
+    reviewPolicy: { startDate: '', halfEnabled: true }, buyFundByCategory: {},
   };
 
   function get() {

@@ -78,7 +78,7 @@ def check(browser, url):
       Store.set('__meta',{schema:1});
     }""", dates)
     page.reload()
-    expect(page.get_by_text("补仓设置已简化", exact=True)).to_be_visible()
+    expect(page.get_by_text("检查日期已修正", exact=True)).to_be_visible()
     assert page.evaluate("Store.get('__meta').schema === Store.SCHEMA")
     assert page.evaluate("Store.getRollback().version") == 1
     assert page.evaluate("Actions.between(Store.get('snapshots')[1],null).length") == 1

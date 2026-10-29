@@ -20,11 +20,21 @@ var Store = (function () {
   //    读到 undefined,当成「这项没填」照样往下算,数字全变但一个错都不报。
   //    而代码是自动更新的(GitHub Pages + Service Worker)——
   //    你某天打开发现总额不对,根本想不到是三天前我改了个字段名。
-  var SCHEMA = 4;
+  var SCHEMA = 5;
 
   // 版本 n → n+1 的升级函数。**只往前,不回退。**
   // 每条都要能重复跑而结果不变(万一中途失败重来一次)。
   var MIGRATE = {
+    4: function (data) {
+      var settings = data.settings || {}, p = settings.reviewPolicy || {};
+      var start = firstSnapshotDate([{ date: p.startDate }]) || firstSnapshotDate(data.snapshots || []);
+      settings.reviewPolicy = Object.assign({}, p, { startDate: start, source: 'first-snapshot' });
+      data.settings = settings;
+      (data.todos || []).forEach(function (t) {
+        if (t && (t.status === 'open' || t.status === 'partial')) { t.status = 'held'; t.reason = '检查日已从首次盘点起算，请按最新余额重新评估'; }
+      });
+      return data;
+    },
     3: function (data) {
       // 只停止旧口径的未执行建议，不动余额、成交或旧配置，后者兼容保留但不再使用。
       (data.todos || []).forEach(function (t) {
@@ -64,6 +74,15 @@ var Store = (function () {
       return data;
     },
   };
+
+  // 既有账本的最早有效盘点，是自动计时唯一的初始来源；存储迁移不依赖 UI/业务加载。
+  function firstSnapshotDate(snaps) {
+    return (snaps || []).map(function (s) { return s && s.date; }).filter(function (date) {
+      if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return false;
+      var stamp = Date.parse(date + 'T12:00:00Z');
+      return isFinite(stamp) && new Date(stamp).toISOString().slice(0, 10) === date;
+    }).sort()[0] || '';
+  }
 
   // 所有会被导出/导入的键。加了新键**必须加进来**,
   // 否则备份里悄悄少一样,而你只有在换手机之后才发现。
@@ -318,7 +337,7 @@ var Store = (function () {
 
   return { NS: NS, KEYS: KEYS, SCHEMA: SCHEMA, get: get, set: set, remove: remove, keys: keys,
            exportAll: exportAll, inspectImport: inspectImport, importAll: importAll,
-           clearAll: clearAll, boot: boot,
+           clearAll: clearAll, boot: boot, replaceData: replaceData, firstSnapshotDate: firstSnapshotDate,
            saveRollback: saveRollback, getRollback: getRollback, rollback: rollback };
 })();
 

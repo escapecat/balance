@@ -1,8 +1,13 @@
 // 日历、检查留痕和卖出授权。检查完成不是成交；唯一成交来源仍是 Actions。
 var Strategy = (function () {
-  function policy(s) {
+  function firstDate(snaps) {
+    return Store.firstSnapshotDate(snaps);
+  }
+  function policy(s, snaps) {
     var p = s.reviewPolicy || {};
-    return { annualDate: Trading.isDate(p.annualDate) ? p.annualDate : '', halfEnabled: p.halfEnabled !== false };
+    var start = Trading.isDate(p.startDate) ? p.startDate : firstDate(snaps || Store.get('snapshots', []));
+    return { startDate: start, annualDate: start ? addMonths(start, 12) : '', halfEnabled: p.halfEnabled !== false,
+      legacyAnnualDate: Trading.isDate(p.annualDate) ? p.annualDate : '' };
   }
   function addMonths(date, months) {
     if (!Trading.isDate(date)) return '';
@@ -18,18 +23,25 @@ var Strategy = (function () {
     });
   }
   function schedule(s, date) {
-    var p = policy(s), next = p.annualDate;
-    reviews().forEach(function (r) { if (r.base === p.annualDate && r.kind === 'annual' && r.nextDate > next) next = r.nextDate; });
-    var half = p.halfEnabled && next ? addMonths(next, -6) : '';
-    var checked = reviews().some(function (r) { return r.base === p.annualDate && r.kind === 'half' && r.dueDate === half; });
+    var p = policy(s), cycle = 1, next = p.annualDate;
+    function matches(r) { return r.base === p.startDate || r.base === p.legacyAnnualDate; }
+    reviews().forEach(function (r) {
+      // 旧误报产生的首个周年之前的检查保留在历史，但不跳过真正的首个周年。
+      if (next && matches(r) && r.kind === 'annual' && r.dueDate >= p.annualDate && r.date >= r.dueDate && r.date <= date) {
+        while (next <= r.date) { cycle++; next = addMonths(p.startDate, cycle * 12); }
+      }
+    });
+    var half = p.halfEnabled && next ? addMonths(p.startDate, cycle * 12 - 6) : '';
+    var checked = reviews().some(function (r) { return matches(r) && r.kind === 'half' && r.dueDate === half && r.date >= half && r.date <= date; });
     var approval = (Store.get('prefs', {}) || {}).strategyApproval, recheck = false;
-    if (approval && approval.base === p.annualDate && next) {
+    var sameApproval = approval && (approval.calendar === 'start-v1' ? approval.base === p.startDate : approval.base === p.legacyAnnualDate && approval.dueDate >= p.annualDate);
+    if (sameApproval && next && approval.date <= date) {
       var items = (Store.get('todos', []) || []).filter(function (t) { return t.kind === 'sell' && t.contextKey === approval.contextKey; });
       var outstanding = !items.length || items.some(function (t) { return t.status === 'open' || t.status === 'partial' || t.status === 'held'; });
       var latest = Ledger.latest(Store.get('snapshots', []) || []);
       recheck = outstanding && (approval.date !== date || !latest || approval.contextKey !== Allocate.contextKey(latest, s));
     }
-    return { configured: !!next, annualDate: next, halfDate: half,
+    return { configured: !!next, startDate: p.startDate, annualDate: next, halfDate: half,
       annualDue: !!next && date >= next, annualRecheck: recheck, halfDue: !!half && date >= half && date < next && !checked };
   }
   function pending(snap) { return Actions.between(snap, null).filter(function (a) { return Actions.MONEY[a.kind]; }); }
@@ -54,20 +66,20 @@ var Strategy = (function () {
       if (Allocate.suggestMode(snap, settings).mode === 'monthly') return { ok: false, why: '先用可投新钱修正配置，更新余额后再评估卖出' };
       var plan = Allocate.planAnnual(snap, settings, date);
       if (!plan.sells.length) return { ok: false, why: '当前没有可生成的卖出计划' };
-      prefs.strategyApproval = { contextKey: plan.contextKey, date: date, dueDate: cycleDate, base: policy(settings).annualDate };
+      prefs.strategyApproval = { contextKey: plan.contextKey, date: date, dueDate: cycleDate, base: policy(settings).startDate, calendar: 'start-v1' };
     } else delete prefs.strategyApproval;
-    var next = cycleDate;
-    if (kind === 'annual') { do { next = addMonths(next, 12); } while (next && next <= date); }
+    var start = policy(settings).startDate, n = 1, next = due.annualDate;
+    if (kind === 'annual') { next = addMonths(start, 12); while (next && next <= date) { n++; next = addMonths(start, n * 12); } }
     prefs.strategyReviews = reviews().concat([{ kind: kind, decision: decision, date: date,
-      dueDate: kind === 'annual' ? cycleDate : due.halfDate, nextDate: next, base: policy(settings).annualDate }]);
+      dueDate: kind === 'annual' ? cycleDate : due.halfDate, nextDate: next, base: start }]);
     if (Store.set('prefs', prefs) === false) return { ok: false, why: '检查记录保存失败，未生成计划' };
     return { ok: true };
   }
   function approved(snap, settings, date) {
     var a = (Store.get('prefs', {}) || {}).strategyApproval;
-    return !!a && a.date === date && a.contextKey === Allocate.contextKey(snap, settings);
+    return !!a && a.calendar === 'start-v1' && a.base === policy(settings).startDate && a.date === date && a.contextKey === Allocate.contextKey(snap, settings);
   }
-  return { policy: policy, addMonths: addMonths, reviews: reviews, schedule: schedule,
+  return { policy: policy, firstDate: firstDate, addMonths: addMonths, reviews: reviews, schedule: schedule,
     pending: pending, block: block, review: review, approved: approved };
 })();
 if (typeof module !== 'undefined') module.exports = Strategy;

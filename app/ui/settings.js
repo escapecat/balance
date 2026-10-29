@@ -56,14 +56,14 @@ var SettingsUI = (function () {
     // 每次 render 都做的话，勾一条待办都会把你弹回顶部。
     var vNow = String(sub);
     if (vNow !== lastView) { lastView = vNow; Dom.toTop(); }
-    if (sub === 'data') { dataScreen(); return; }
+    if (['data', 'sync', 'backups', 'restore', 'records', 'about'].indexOf(sub) >= 0) { dataScreen(); return; }
     if (!sub) {
       var menu = h('div', { class: 'wrap screen-root settings-menu' }, [h('h1', {}, ['设置']), h('p', { class: 'sub' }, ['按需要进入，不必逐项往下找'])]);
       var codes = {}, missing = {};
       Config.allKnown().forEach(function (f) { codes[f.code] = true; });
       (Store.get('snapshots', []) || []).forEach(function (sn) { Object.keys(sn.holdings || {}).forEach(function (code) { if (!codes[code]) missing[code] = true; }); });
       [['strategy', '策略与检查', '日常只买不卖 · 年度 / 半年检查'], ['targets', '目标配置', '类别与现金比例'],
-        ['cash', '现金保留', '统一保底与补仓门槛'], ['funds', '基金与限额', '申购状态、额度与买入通道'], ['data', '数据与备份', '同步、导出、回滚与组合外资产']].forEach(function (item) {
+        ['cash', '现金保留', '统一保底与补仓门槛'], ['funds', '基金与限额', '申购状态与每日额度'], ['data', '数据与备份', '同步、导出、回滚与组合外资产']].forEach(function (item) {
         menu.appendChild(Dom.menuRow(item[1], item[2] + (item[0] === 'funds' && Object.keys(missing).length ? ' · ' + Object.keys(missing).length + ' 只未分类' : ''), function () { go(item[0]); }));
       });
       el.appendChild(menu); return;
@@ -74,8 +74,8 @@ var SettingsUI = (function () {
     var snap = Ledger.latest(snaps);
     var sm = snap ? Portfolio.summarize(snap, s) : null;
 
-    var titles = { strategy: '策略与检查', targets: '目标配置', cash: '现金保留', funds: '基金与限额', assets: '组合外资产', channels: '买入通道', empty: '已清仓基金' };
-    w.appendChild(Dom.backBar(titles[sub] || '设置', function () { go(sub === 'assets' ? 'data' : sub === 'channels' || sub === 'empty' ? 'funds' : null); }));
+    var titles = { strategy: '策略与检查', targets: '目标配置', cash: '现金保留', funds: '基金与限额', assets: '组合外资产', empty: '已清仓基金' };
+    w.appendChild(Dom.backBar(titles[sub] || '设置', function () { go(sub === 'assets' ? 'data' : sub === 'empty' ? 'funds' : null); }));
     var rawSettings = Store.get('settings', {}) || {};
     var emptyEntries = ['funds', 'retired'].reduce(function (n, key) {
       return n + (Array.isArray(rawSettings[key]) ? rawSettings[key].filter(function (f) { return !f; }).length : 0);
@@ -276,10 +276,6 @@ var SettingsUI = (function () {
     // 持仓大的在前 —— 顺序和「谁是主基金」的规则一致,看着不会打架
     live.sort(function (a, b) { return (held[b.code] || 0) - (held[a.code] || 0); });
 
-    // 每类持仓最大的那只 = 买入落点。**算出来的,不是标记出来的**
-    var mainOf = Allocate.buyingOf(s, held);
-    Object.keys(mainOf).forEach(function (cat) { mainOf[cat] = mainOf[cat] ? mainOf[cat].code : ''; });
-
     w.appendChild(h('h2', {}, ['基金', h('span', { class: 'n' }, [live.length + ' 只'])]));
     var fl = h('div', { class: 'list' });
     live.forEach(function (f) {
@@ -290,7 +286,6 @@ var SettingsUI = (function () {
           h('div', { class: 'ttl' }, [f.name || f.code]),
           h('div', { class: 'sub2' }, [
             f.code + ' · ' + f.category +
-            (mainOf[f.category] === f.code ? ' · 当前买入通道' : '') +
             ' · ' + Trading.LABELS[Trading.of(f).status] +
             (Trading.of(f).status === 'limited' ? ' ¥' + money(Trading.of(f).dailyLimit) + '/日' : '') +
             (Trading.of(f).checkedOn ? ' · 核实于 ' + Trading.of(f).checkedOn : ''),
@@ -307,19 +302,8 @@ var SettingsUI = (function () {
       class: 'btn ghost', style: 'margin-top:8px',
       onclick: function () { editFund({}, true); },
     }, ['＋ 加一只基金']));
-    w.appendChild(Dom.menuRow('买入通道', '每类选择一只基金，不因限购自动换基金', function () { go('channels'); }));
     if (empty.length) w.appendChild(Dom.menuRow('已清仓基金', empty.length + ' 只 · 编辑或移除', function () { go('empty'); }));
     var fundSection = w;
-    var channelSection = h('section', { class: 'settings-detail' });
-    w = channelSection;
-    Object.keys(s.targets || {}).forEach(function (cat) {
-      var selected = mainOf[cat], fund = funds.filter(function (f) { return f.code === selected; })[0];
-      w.appendChild(h('button', { class: 'settings-route', onclick: function () {
-        Modal.pick({ title: cat + ' · 选择买入通道', hint: '同类别不代表同指数。请核对跟踪标的、费用与限制；不自动切换备选。',
-          options: [{ key: '__auto__', label: '默认：持仓最大的现役基金', hint: '若限购，不自动改选其他基金' }].concat(funds.filter(function (f) { return f.category === cat; }).map(function (f) { return { key: f.code, label: f.name || f.code, hint: f.code + ' · ' + Trading.LABELS[Trading.of(f).status] }; }))
-        }).then(function (code) { if (!code) return; var r = Config.chooseBuyFund(cat, code === '__auto__' ? '' : code); if (!r.ok) Modal.note({ title: '未更改', body: r.why }); render(); });
-      } }, [cat + ' 买入通道', h('span', {}, [(fund ? fund.name || fund.code : '待选择') + ' ›'])]));
-    });
 
     var emptySection = h('section', { class: 'settings-detail' });
     w = emptySection;
@@ -346,7 +330,6 @@ var SettingsUI = (function () {
 
     // ---- 现金 ----
     sections.funds = fundSection;
-    sections.channels = channelSection;
     sections.empty = emptySection;
     w = settingGroup('03', '现金保护', '统一现金保底与目标比例，不按账户区分');
     // ⚠️ 现金的**目标占比在上面「目标比例」里**(它是第七个类别)。
@@ -431,15 +414,11 @@ var SettingsUI = (function () {
     var p = Strategy.policy(s), sc = Strategy.schedule(s, Trading.today());
     var box = h('section', { class: 'settings-strategy' }, [h('h2', {}, ['01 · 执行策略']),
       h('p', { class: 'hint' }, ['新钱每月只买不卖；年度到期先检查，只有明确确认后才生成卖出。提醒只在打开应用时展示，不是系统推送。'])]);
-    box.appendChild(h('button', { class: 'settings-route', onclick: function () {
-      Modal.form({ title: '年度与半年检查', hint: '首次检查日由你决定，不从建仓或盘点日期猜算。清空日期只停用日程，不阻止日常补仓。',
-        fields: [{ key: 'date', label: '年度检查锚点日期', type: 'date', hint: '首次检查日期；后续按检查记录顺延' },
-          { key: 'half', label: '半年中途检查', type: 'select', options: [{ key: 'yes', label: '开启 · 提前六个月，只检查不自动交易' }, { key: 'no', label: '关闭' }] }],
-        values: { date: p.annualDate, half: p.halfEnabled ? 'yes' : 'no' },
-        validate: function (v) { return !v.date || Trading.isDate(v.date) ? null : '请选择有效日期。'; }
-      }).then(function (v) { if (v) save({ reviewPolicy: { annualDate: v.date, halfEnabled: v.half === 'yes' } }); });
-    } }, ['年度检查', h('span', {}, [sc.annualDate || '待设置', ' ›'])]));
-    box.appendChild(h('div', { class: 'hint' }, [sc.halfDate ? '半年提醒 ' + sc.halfDate + '；月末日期按目标月最后一天处理。' : '未设年度日期时，不推算半年检查。']));
+    box.appendChild(infoRow2('策略开始日', '自动取最早一期盘点，无需再次输入；之后不随新增或删除记录移动', p.startDate || '首次盘点后自动确定'));
+    box.appendChild(infoRow2('下次年度检查', '从开始日起满一年；到期只评估，不自动交易', sc.annualDate || '等待首次盘点'));
+    box.appendChild(h('label', { class: 'review-check' }, [h('input', { type: 'checkbox', 'aria-label': '半年中途检查', checked: p.halfEnabled ? '' : null,
+      onchange: function (e) { save({ reviewPolicy: Object.assign({}, s.reviewPolicy || {}, { halfEnabled: e.target.checked }) }); } }), h('span', {}, ['半年中途检查 · 只检查，不自动交易'])]));
+    box.appendChild(h('div', { class: 'hint' }, [sc.halfDate ? '半年提醒 ' + sc.halfDate + '；月末与闰年按原开始日计算。' : '半年提醒已关闭；年度检查不受影响。']));
     box.appendChild(numItem('偏差带', '年度评估时检查绝对偏离百分点；不是每月自动卖出阈值', 'band', Math.round(s.band * 1000) / 10, '%'));
     var log = Strategy.reviews();
     if (log.length) {
@@ -637,14 +616,22 @@ var SettingsUI = (function () {
   /** 二级屏:数据与备份。低频操作全在这儿。 */
   function dataScreen() {
     var w = h('div', { class: 'wrap' });
-    w.appendChild(Dom.backBar('数据与备份', function () { go(null); }));
-    w.appendChild(Dom.menuRow('组合外资产', '编辑名称与分类，金额在录入余额时填写', function () { go('assets'); }));
+    var titles = { data: '数据与备份', sync: '云端同步', backups: '备份文件', restore: '恢复与回滚', records: '买卖记录起点', about: '版本与显示' };
+    w.appendChild(Dom.backBar(titles[sub], function () { go(sub === 'data' ? null : 'data'); }));
+    if (sub === 'data') {
+      [['sync', '云端同步', Sync.status().text || '配置与推送 / 拉取'], ['backups', '备份文件', '导出、导入本机文件'],
+        ['restore', '恢复与回滚', '云端历史与本机回滚点'], ['records', '买卖记录起点', '收益计算的完整记录边界'],
+        ['assets', '组合外资产', '编辑名称与分类'], ['about', '版本与显示', '更新应用、屏幕适配信息']].forEach(function (item) {
+        w.appendChild(Dom.menuRow(item[1], item[2], function () { go(item[0]); }));
+      });
+      el.appendChild(w); return;
+    }
 
     // ---- 同步 ----
     //
     // ⚠️ 放在最上面,因为它一旦配好,下面那个「唯一的兜底」就不再是唯一的。
+    if (sub === 'sync') {
     var sy = Sync.status();
-    w.appendChild(h('h2', {}, ['同步']));
     w.appendChild(h('div', { class: 'list' }, [
       h('div', { class: 'list-row', onclick: syncSetup }, [
         h('div', { class: 'body' }, [
@@ -670,16 +657,14 @@ var SettingsUI = (function () {
       w.appendChild(h('button', {
         class: 'btn ghost', style: 'margin-top:8px', onclick: syncPullNow,
       }, ['从云端取下来']));
-      w.appendChild(h('button', {
-        class: 'btn ghost', style: 'margin-top:8px', onclick: syncHistory,
-      }, ['从历史版本恢复']));
       w.appendChild(h('div', { class: 'hint' }, [
         '**不会自动推** —— 改完记得回来点一下。每推一次在云端留一个版本,' +
         '「从历史版本恢复」能翻回任何一次。',
       ]));
     }
-
-    w.appendChild(h('h2', {}, ['备份文件']));
+    w.appendChild(h('div', { class: 'hint' }, ['推送只同步数据，不代表完成年度检查；检查日从策略开始日计算。']));
+    }
+    if (sub === 'backups') {
     w.appendChild(h('div', { class: 'hint', style: 'margin-bottom:8px' }, [
       Sync.ready()
         ? '同步之外再存一份 —— 两处都坏的概率比一处小得多。'
@@ -688,7 +673,9 @@ var SettingsUI = (function () {
     w.appendChild(h('button', { class: 'btn ghost', onclick: exportFile }, ['导出备份']));
     w.appendChild(h('button', { class: 'btn ghost', style: 'margin-top:8px',
                                 onclick: importFile }, ['导入备份']));
-
+    }
+    if (sub === 'restore') {
+    if (Sync.ready()) w.appendChild(h('button', { class: 'btn ghost', onclick: syncHistory }, ['从云端历史版本恢复']));
     // ⚠️ 只在**真有**回滚点的时候才显示。平时挂一个「回到上一个状态」
     //    但点了说「没有可回滚的」,比不放还糟 —— 你会以为自己一直有条后路。
     var rb = Store.getRollback();
@@ -705,14 +692,14 @@ var SettingsUI = (function () {
           class: 'btn ghost', style: 'margin-top:8px', onclick: doRollback,
         }, ['退回上一个状态']));
       }
+    } else w.appendChild(h('div', { class: 'note' }, ['本机还没有回滚点。导入、升级或删除记录前会自动保留一份。']));
     }
-
     // ⚠️ 平时不用管。唯一会用到的情况是「某次对账之后买过东西但没记」——
     //    那笔会被算成「市场涨跌」。把起点往后挪一期,那期就退回「分不出」,
     //    总比留着一个错的数强。
+    if (sub === 'records') {
     var since = Actions.since();
     if (since) {
-      w.appendChild(h('h2', {}, ['买卖记录起点']));
       w.appendChild(h('div', { class: 'list' }, [
         h('div', { class: 'list-row', onclick: function () { editSince(since); } }, [
           h('div', { class: 'body' }, [
@@ -722,8 +709,10 @@ var SettingsUI = (function () {
           h('span', { class: 'chev' }),
         ]),
       ]));
+    } else w.appendChild(h('div', { class: 'note' }, ['尚未声明完整买卖记录起点；开始完整记买卖后再确认，不从策略开始日猜算。']));
+    w.appendChild(h('div', { class: 'hint' }, ['这是收益计算边界，不是策略开始日或年度检查日期。']));
     }
-
+    if (sub === 'about') {
     // ⚠️ 「我改了你怎么还是老样子」这种事,不给版本号就只能靠猜。
     var build = null;
     try {
@@ -785,6 +774,7 @@ var SettingsUI = (function () {
       ]),
     ]));
 
+    }
     el.appendChild(w);
   }
 

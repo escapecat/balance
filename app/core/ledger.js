@@ -196,7 +196,15 @@ var Ledger = (function () {
     if (!Array.isArray(snap.actionIds) && typeof Actions !== 'undefined') {
       snap = Object.assign({}, snap, { actionIds: Actions.capture(snap.date) });
     }
-    if (Store.set('snapshots', append(Store.get('snapshots', []) || [], snap)) === false) {
+    var list = append(Store.get('snapshots', []) || [], snap), settings = Store.get('settings', {}) || {};
+    var policy = settings.reviewPolicy || {};
+    if (typeof Strategy !== 'undefined' && !Trading.isDate(policy.startDate) && Strategy.firstDate(list)) {
+      // 首次盘点与自动起点一次提交；失败由同一存储边界恢复，不能留下半份状态。
+      var data = Store.exportAll().data;
+      data.settings = Object.assign({}, settings, { reviewPolicy: Object.assign({}, policy, { startDate: Strategy.firstDate(list), source: 'first-snapshot' }) });
+      data.snapshots = list;
+      Store.replaceData(data, '自动确定策略起点之前');
+    } else if (Store.set('snapshots', list) === false) {
       throw new Error('余额保存失败,请先导出备份并检查存储空间');
     }
     Store.remove('draft');            // 存成功了草稿就该消失,不然下次进来还问你要不要续

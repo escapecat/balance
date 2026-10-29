@@ -42,6 +42,21 @@ async function main() {
     assert.equal(await page.evaluate(() => Store.get('flows').length), 0);
     assert.equal(await page.evaluate(() => Store.get('todos').length), 2);
     await shot('limited-buy');
+    // Choose the actual fund in the plan, not a prerequisite settings page.
+    const choices = seed(date);
+    choices.settings.funds.push({ code: '444444', name: '合成可选基金', category: '纳指', trade: { status: 'open' } });
+    await putSeed(page, choices, 4); await planView();
+    await page.locator('.choose-plan-fund').click();
+    await dialog().getByRole('button').filter({ hasText: '合成可选基金' }).click(); await closeWait();
+    assert.equal(await page.evaluate(() => Config.get().buyFundByCategory['纳指']), '444444');
+    assert.equal(await page.evaluate(() => Store.get('flows').length), 0);
+    assert.equal(await page.evaluate(() => JSON.stringify(Store.get('snapshots'))), JSON.stringify(choices.snapshots));
+    assert.equal(Number((await page.locator('.strategy-amount').textContent()).replace(/[^\d]/g, '')), 20000);
+    await page.evaluate(() => Actions.add({ date: Trading.today(), kind: 'buy', code: '444444', amount: 5 }));
+    await page.locator('.choose-plan-fund').click();
+    assert.match(await dialog().textContent(), /不能中途更换基金/);
+    await dialog().getByRole('button', { name: '知道了', exact: true }).click(); await closeWait();
+    await putSeed(page, data, 3);
     await tab(page, '设置'); await shot('settings');
     for (const title of ['策略与检查', '目标配置', '现金保留', '基金与限额', '数据与备份']) assert.equal(await page.locator('.settings-menu .menu-row').filter({ hasText: title }).count(), 1);
     await openSection('基金与交易限制');
@@ -112,13 +127,17 @@ async function main() {
     await editor().getByRole('button', { name: '完成', exact: true }).click(); await saveFund();
     await planView();
     assert.equal(Number((await page.locator('.strategy-amount').textContent()).replace(/[^\d]/g, '')), 4100);
-    // Set a calendar through actual settings controls; half review does not trade.
-    await putSeed(page, seed(date), 3); await tab(page, '设置');
+    // Calendar comes from the first snapshot; no date needs to be entered again.
+    const halfSeed = seed(date);
+    const halfStart = await page.evaluate(d => Strategy.addMonths(d, -6), date);
+    halfSeed.snapshots.unshift(Object.assign({}, halfSeed.snapshots[0], { date: halfStart, actionIds: [] }));
+    await putSeed(page, halfSeed, 4); await tab(page, '设置');
     await openSection('策略与检查');
-    await page.locator('.settings-strategy .settings-route').click();
-    const annualDate = await page.evaluate(d => Strategy.addMonths(d, 6), date);
-    await dialog().getByLabel('年度检查锚点日期', { exact: true }).fill(annualDate);
-    await dialog().getByRole('button', { name: '保存', exact: true }).click(); await closeWait();
+    assert.equal(await page.locator('.settings-strategy input[type=date]').count(), 0);
+    assert.match(await page.locator('.settings-strategy').textContent(), new RegExp(halfStart));
+    await page.getByLabel('半年中途检查', { exact: true }).uncheck();
+    assert.equal(await page.evaluate(() => Strategy.schedule(Config.get(), Trading.today()).halfDue), false);
+    await page.getByLabel('半年中途检查', { exact: true }).check();
     await tab(page, '现在'); await review('开始半年检查 ›');
     const checked = page.getByRole('button', { name: '本次已检查，不交易', exact: true });
     assert.equal(await checked.isDisabled(), true);
@@ -127,7 +146,7 @@ async function main() {
     assert.equal(await page.evaluate(() => Strategy.reviews().length), 1);
     assert.equal(await page.evaluate(() => Store.get('flows').length), 0);
     // Annual preview -> cancel -> confirm -> sells only -> actual sell recorded.
-    const annual = seed(date); annual.settings.reviewPolicy.annualDate = date;
+    const annual = seed(date); annual.settings.reviewPolicy.startDate = await page.evaluate(d => Strategy.addMonths(d, -12), date);
     annual.snapshots[0].holdings = { '111111': 300000, '222222': 250000, '333333': 400000 };
     annual.snapshots[0].cash.c = 50000;
     await putSeed(page, annual, 3);
@@ -150,7 +169,7 @@ async function main() {
     assert.equal(await page.evaluate(() => Store.get('flows').length), 1);
     assert.equal(await page.evaluate(() => Store.get('todos').some(t => t.kind === 'buy')), false);
     // New money still comes first, even on an annual due date.
-    const funded = seed(date); funded.settings.reviewPolicy.annualDate = date;
+    const funded = seed(date); funded.settings.reviewPolicy.startDate = await page.evaluate(d => Strategy.addMonths(d, -12), date);
     await putSeed(page, funded, 3); await review('开始年度检查 ›');
     assert.match(await page.locator('.page').textContent(), /先投新钱，暂不卖旧仓/);
     assert.equal(await page.getByRole('button', { name: '预览确认后，生成卖出计划', exact: true }).count(), 0);
@@ -175,7 +194,7 @@ async function main() {
     assert.notEqual(hero.bg, 'none'); assert.match(hero.bg, /gradient/);
     await shot('dark-buy');
     assert.deepEqual(errors, []); assert.deepEqual(writes, []);
-    console.log(JSON.stringify({ browser: engine, status: 'pass', tests: ['settings-edit', 'no-account-cash-controls', 'legacy-cash-rules-ignored', 'chinese-balance-entry', 'optional-fund-metadata', 'four-subscription-states', 'zero-limit', 'actuals-not-budget', 'same-plan-multiple-funds', 'manual-pending-fence', 'calendar-edit', 'half-check-no-trade', 'annual-confirm-cancel', 'annual-sells-only', 'new-money-first', 'responsive', 'dark-theme'], externalWrites: 0, pageErrors: errors }, null, 2));
+    console.log(JSON.stringify({ browser: engine, status: 'pass', tests: ['settings-edit', 'plan-fund-choice', 'no-mid-plan-switch', 'no-account-cash-controls', 'legacy-cash-rules-ignored', 'chinese-balance-entry', 'optional-fund-metadata', 'four-subscription-states', 'zero-limit', 'actuals-not-budget', 'same-plan-multiple-funds', 'manual-pending-fence', 'automatic-calendar-no-date-input', 'half-check-no-trade', 'annual-confirm-cancel', 'annual-sells-only', 'new-money-first', 'responsive', 'dark-theme'], externalWrites: 0, pageErrors: errors }, null, 2));
   } finally { await context.close(); await browser.close(); if (local) await new Promise(resolve => local.server.close(resolve)); }
 }
 main().catch(e => { console.error(e); process.exitCode = 1; });

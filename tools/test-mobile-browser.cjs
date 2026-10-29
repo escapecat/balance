@@ -84,10 +84,24 @@ async function main() {
       await page.locator('.settings-menu .menu-row').filter({ hasText: name }).click(); await reachable(back());
       assert.equal(await page.locator('.settings-menu').count(), 0); await back().click();
     }
+    await page.getByRole('button', { name: /数据与备份/ }).click(); await fits('data menu'); await shot('data-menu');
+    for (const name of ['云端同步', '备份文件', '恢复与回滚', '买卖记录起点', '组合外资产', '版本与显示']) {
+      await page.getByRole('button', { name: new RegExp(name) }).click(); await reachable(back());
+      await page.getByRole('heading', { name, exact: true }).waitFor();
+      if (name !== '组合外资产') assert.equal(await page.getByRole('button', { name: /组合外资产/ }).count(), 0, 'Data sections should not stack on one page');
+      if (name === '恢复与回滚') {
+        await page.getByRole('button', { name: '退回上一个状态', exact: true }).click();
+        await page.locator('.modal-mask:not(.closing)').getByRole('button', { name: '取消', exact: true }).click();
+        await page.locator('.modal-mask').waitFor({ state: 'detached' });
+      }
+      await back().click(); await page.getByRole('heading', { name: '数据与备份', exact: true }).waitFor();
+    }
+    await back().click();
     await page.getByRole('button', { name: /目标配置/ }).click();
     const targetRows = page.locator('.settings-detail .list-row'); assert.equal(await targetRows.count(), 4);
     await page.getByRole('button', { name: '下一页', exact: true }).click(); const targetPage = await targetRows.allTextContents();
     await back().click(); await page.getByRole('button', { name: /基金与限额/ }).click();
+    assert.doesNotMatch(await page.locator('.page').textContent(), /买入通道|补仓落点/);
     assert.equal(await page.locator('.settings-detail .list-row').count(), 4);
     await page.getByRole('button', { name: /已清仓基金/ }).click();
     assert.equal(await page.locator('.settings-detail .list-row').count(), 4);

@@ -35,7 +35,7 @@ async function putSeed(page, data, version) {
   await page.reload();
   const migration = page.locator('.modal-mask:not(.closing)');
   if (await migration.count()) {
-    assert.match(await migration.locator('.modal-title').textContent(), /升级|修复|已简化/);
+    assert.match(await migration.locator('.modal-title').textContent(), /升级|修复|已简化|已修正/);
     await migration.getByRole('button', { name: '知道了', exact: true }).click();
     await page.locator('.modal-mask').waitFor({ state: 'detached' });
   }
@@ -140,10 +140,23 @@ async function main() {
         await privatePage.goto(url); await privatePage.waitForFunction(() => typeof Store !== 'undefined');
         await putSeed(privatePage, backup.data, backup.version);
         const original = await privatePage.evaluate(() => JSON.stringify(Store.exportAll().data));
-        for (const key of ['snapshots', 'flows', 'settings', 'assets', 'prefs']) {
+        for (const key of ['snapshots', 'flows', 'assets', 'prefs']) {
           assert.ok(await privatePage.evaluate(({ key, expected }) => JSON.stringify(Store.get(key)) === expected,
             { key, expected: JSON.stringify(backup.data[key]) }), 'Private ledger migration changed ' + key + ' (amounts suppressed)');
         }
+        assert.ok(await privatePage.evaluate(expected => {
+          const settings = Store.get('settings'), policy = settings.reviewPolicy;
+          const raw = JSON.parse(expected);
+          if (raw.reviewPolicy && raw.reviewPolicy.startDate === undefined) delete policy.startDate;
+          if (!raw.reviewPolicy || raw.reviewPolicy.source === undefined) delete policy.source;
+          return JSON.stringify(settings) === expected;
+        }, JSON.stringify(backup.data.settings)), 'Private settings changed beyond the automatic calendar fields (amounts suppressed)');
+        const calendar = await privatePage.evaluate(() => {
+          const snaps = Store.get('snapshots'), sc = Strategy.schedule(Config.get(), Trading.today());
+          return { startsAtFirstSnapshot: sc.startDate === Store.firstSnapshotDate(snaps),
+            firstAnnualNotStart: Strategy.policy(Config.get()).annualDate === Strategy.addMonths(sc.startDate, 12) };
+        });
+        assert.ok(Object.values(calendar).every(Boolean), 'Private auto calendar failed');
         // Check real-data layout without logging amounts, capturing images or connecting Sync.
         for (const width of [360, 390, 430]) {
           await privatePage.setViewportSize({ width, height: 740 });

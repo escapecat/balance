@@ -950,6 +950,7 @@ button:focus-visible,summary:focus-visible,input:focus-visible,select:focus-visi
 .now-overview .hero-split { margin-top:var(--s2); padding-top:var(--s2); }
 .now-overview .metric-card { padding:var(--s2) var(--s3); }.now-overview .metric-card b { margin:0; font-size:22px; }
 .now-overview .home-actions { margin:var(--s3) 0 var(--s1); }.now-overview .menu-row { min-height:58px; padding:var(--s2) 0; }
+.now-overview .menu-row small { margin-top:0; line-height:1.4; }
 .status-strip { display:block; width:100%; min-height:var(--tap); border:0; border-radius:var(--r-sm); padding:var(--s2) var(--s3); margin-top:var(--s2);
   background:var(--warn-dim); color:var(--warn); font:inherit; font-size:var(--t-xs); text-align:left; cursor:pointer; }
 .allocation-detail { padding:var(--s3) 0; border-bottom:1px solid var(--border); }.allocation-detail .sub2 { font-size:var(--t-xs); color:var(--text-dim); margin-top:var(--s2); }
@@ -958,7 +959,7 @@ button:focus-visible,summary:focus-visible,input:focus-visible,select:focus-visi
 .stats-screen .asset-chart>.hint { font-size:var(--t-xs); line-height:1.5; }
 .stats-screen .asset-chart .button-pair { margin:var(--s2) 0 0; }.stats-screen .asset-chart .link { min-height:var(--tap); font-size:var(--t-xs); }
 .stats-trend>.menu-row { min-height:48px; padding:var(--s2) 0; }
-.history-screen .history-card { padding:var(--s3); margin:var(--s2) 0; }
+.history-screen .history-card { padding:var(--s2) var(--s3); margin:var(--s2) 0; }
 .history-screen .history-total { font-size:22px; margin:0; }.history-screen .history-breakdown { margin-top:var(--s1); }
 .history-screen .history-card .range-line { margin-bottom:var(--s1); }.history-screen .pending-label { margin-top:var(--s1); padding:var(--s1); }
 .history-screen .result-count { margin:var(--s1) 0 var(--s2); }.history-screen .history-flow { min-height:100px; }

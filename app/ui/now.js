@@ -152,7 +152,7 @@ var NowUI = (function () {
     if (typeof Sync !== 'undefined' && Sync.ready() && Sync.cfg().dirty) notices.push('有改动未推云端');
     if (notices.length) w.appendChild(h('button', { class: 'status-strip' + (pending.length ? ' pending-note' : ''), onclick: function () { view = 'notices'; render(); Dom.toTop(); } }, [notices.join(' · ') + ' ›']));
     var sc = Strategy.schedule(c.st, today());
-    w.appendChild(Dom.menuRow(sc.annualDue || sc.annualRecheck ? '年度检查待处理' : sc.halfDue ? '半年检查待处理' : '下次年度检查', sc.configured ? sc.annualDate : '尚未设置日期', function () { view = 'schedule'; render(); Dom.toTop(); }));
+    w.appendChild(Dom.menuRow(sc.annualDue || sc.annualRecheck ? '年度检查待处理' : sc.halfDue ? '半年检查待处理' : '下次年度检查', sc.configured ? sc.halfDue && !sc.annualDue && !sc.annualRecheck ? sc.halfDate : sc.annualDate : '首次盘点后自动确定', function () { view = 'schedule'; render(); Dom.toTop(); }));
   }
 
   function renderHomeDetail(w, c) {
@@ -208,15 +208,15 @@ var NowUI = (function () {
     var sc = Strategy.schedule(c.st, today());
     var annual = sc.annualDue || sc.annualRecheck;
     var box = h('div', { class: 'policy-card' }, [h('b', {}, ['新钱每月补仓 · 正式调整每年评估'])]);
-    box.appendChild(h('div', { class: 'hint' }, [!sc.configured ? '还没设首次年度检查日。日常补仓仍可用，不会自动卖出。'
+    box.appendChild(h('div', { class: 'hint' }, [!sc.configured ? '首次盘点后自动安排半年与年度检查，无需填写日期。'
       : sc.annualRecheck ? '上次年度计划尚未执行完，日期或余额已变化；重新检查后才能继续。'
       : sc.annualDue ? '年度检查已到期；先检查，不代表必须交易。'
       : sc.halfDue ? '半年中途检查已到期；只留痕，不自动交易。'
-      : '年度检查 ' + sc.annualDate + (sc.halfDate ? ' · 半年提醒 ' + sc.halfDate : '')]));
+      : '从 ' + sc.startDate + ' 开始 · 年度 ' + sc.annualDate + (sc.halfDate ? ' · 半年 ' + sc.halfDate : '')]));
     box.appendChild(h('button', { class: 'link', onclick: function () {
       if (!sc.configured) { onSettings(); return; }
       view = annual ? 'annual' : 'half'; render();
-    } }, [!sc.configured ? '去设置检查日 ›' : annual ? '开始年度检查 ›' : sc.halfDue ? '开始半年检查 ›' : '查看检查安排 ›']));
+    } }, [!sc.configured ? '查看策略设置 ›' : annual ? '开始年度检查 ›' : sc.halfDue ? '开始半年检查 ›' : '查看检查安排 ›']));
     w.appendChild(box);
   }
 
@@ -272,6 +272,20 @@ var NowUI = (function () {
         h('h2', {}, [r.category]),
         h('div', { class: 'hint' }, ['目标缺口 ¥' + money(r.need) + ' · 本次分配 ¥' + money(r.budget)]),
       ]);
+      var choices = (c.st.funds || []).filter(function (f) { return f.category === r.category; });
+      if (choices.length > 1) card.appendChild(h('button', { class: 'settings-route choose-plan-fund', onclick: function () {
+        if (Strategy.pending(c.snap).length) { Modal.note({ title: '先完成本次对账', body: '这份余额已有待对账买卖，不能中途更换基金后重新执行预算。请在余额包含实际交易后更新盘点。' }); return; }
+        Modal.pick({ title: r.category + ' · 这次买哪只', hint: '只在同类别内选择；请自行核对跟踪标的、费用与申购限制，不自动替换。',
+          options: choices.map(function (f) { var t = Trading.of(f); return { key: f.code, label: f.name || f.code, hint: f.code + ' · ' + Trading.LABELS[t.status] + (t.status === 'limited' ? ' · 每日 ¥' + money(t.dailyLimit) : '') }; })
+        }).then(function (code) {
+          if (!code) return;
+          var latest = Ledger.latest(Store.get('snapshots', [])), settings = Config.get();
+          if (today() !== date || Allocate.contextKey(latest, settings) !== key || Strategy.pending(latest).length) { Modal.note({ title: '余额或记录已变化', body: '请重新打开补仓建议后再选择。' }); return; }
+          var result = Config.chooseBuyFund(r.category, code);
+          if (!result.ok) Modal.note({ title: '选择未保存', body: result.why });
+          render();
+        });
+      } }, ['本次买入基金', h('span', {}, [(r.fund ? r.fund.name || r.fund.code : '请选择') + ' ›'])]));
       if (r.today > 0) card.appendChild(todoRow(by[Todos.keyOf('buy', r.fund.code)], { category: r.category, amount: r.today }, [r.fund.name || r.fund.code, r.limit.platform].filter(Boolean).join(' · '), '建议买 ' + r.category));
       else card.appendChild(h('div', { class: 'equation-row' }, [h('span', {}, ['建议买入']), h('b', {}, ['¥0'])]));
       if (r.restricted) card.appendChild(h('div', { class: 'pending-label' }, ['受限待投 ¥' + money(r.restricted) + ' · ' + r.limit.why]));
@@ -287,7 +301,7 @@ var NowUI = (function () {
     var date = today(), sc = Strategy.schedule(c.st, date), half = view === 'half', checks = [false, false, false];
     w.appendChild(Dom.backBar(half ? '半年检查' : '年度评估', function () { view = 'home'; render(); }));
     w.appendChild(h('p', { class: 'sub' }, [half ? '检查不是交易；不因检查完成生成买卖' : '日期到期只是检查入口，不代表必须卖出']));
-    w.appendChild(h('div', { class: 'policy-card' }, [h('b', {}, [sc.configured ? '年度 ' + sc.annualDate + (sc.halfDate ? ' · 半年 ' + sc.halfDate : '') : '尚未设置首次检查日'])]));
+    w.appendChild(h('div', { class: 'policy-card' }, [h('b', {}, [sc.configured ? '年度 ' + sc.annualDate + (sc.halfDate ? ' · 半年 ' + sc.halfDate : '') : '首次盘点后自动计算检查日'])]));
     var why = Strategy.block(c.snap, date) || Allocate.configurationIssue(c.st);
     if (why) { w.appendChild(h('div', { class: 'note warn' }, [why])); w.appendChild(h('button', { class: 'btn', onclick: onEntry }, ['录入最新余额'])); }
     else if (half) {

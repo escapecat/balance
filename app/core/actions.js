@@ -72,7 +72,7 @@ var Actions = (function () {
       return { ok: false, why: '认不出这种动作:' + a.kind };
     }
     if (MONEY[a.kind]) {
-      if (typeof a.amount !== 'number' || isNaN(a.amount) || a.amount <= 0) {
+      if (typeof a.amount !== 'number' || !isFinite(a.amount) || a.amount <= 0) {
         return { ok: false, why: '金额得是个大于 0 的数' };
       }
     }
@@ -84,6 +84,7 @@ var Actions = (function () {
     if (a.note) rec.note = a.note;
     if (a.todoId) rec.todoId = a.todoId;
     if (a.planDate) rec.planDate = a.planDate;
+    if (a.planKey) rec.planKey = a.planKey;
     var snaps = Store.get('snapshots', []) || [];
     var last = snaps.length ? snaps[snaps.length - 1] : null;
     if (last && last.date <= a.date) rec.afterSnapshot = last.date;

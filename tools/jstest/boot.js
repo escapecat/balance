@@ -101,8 +101,8 @@ var planEl = new El('div');
 ctx.NowUI.showPlan();
 ctx.NowUI.mount(planEl, { onEntry: function () {} });
 var tp = deep(planEl).replace(/\s/g, '');
-ok(head && tp.indexOf(head) >= 0,
-   '★ 方案屏没给出「今天买什么」(算出来该买 ' + head + ')');
+ok((head && tp.indexOf(head) >= 0) || /先更新真实余额|待核实|先录入已包含/.test(tp),
+   '★ 方案屏既没建议也没解释为什么暂不生成计划');
 ok(plan.daily.length === 0 || tp.indexOf(plan.daily[0].category) >= 0,
    '按日投那几项没出来');
 

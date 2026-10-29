@@ -130,7 +130,8 @@
     } else if (current === 'stats') {
       StatsUI.mount(page);
     } else {
-      NowUI.mount(page, { onEntry: function () { entering = true; render(); } });
+      NowUI.mount(page, { onEntry: function () { entering = true; render(); },
+        onSettings: function () { current = 'me'; render(); toTop(); } });
     }
     root.appendChild(page);
     root.appendChild(tabbar());
@@ -187,10 +188,11 @@
   // 升级过就说一声 —— 静默升级和静默出错长得一模一样,
   // 而你需要知道「今天这个数不对」和「昨天我升过级」有没有关系。
   if (booted.ok && booted.migrated && booted.migrated.length) {
-    Modal.note({ title: '同日买卖归期已修复',
-                 body: '盘点后完成的 todo 买卖现在等待下次对账,不再改写盘点前的收益。' +
-                       '交易金额和余额没有修改,不用重记。下次照实录余额即可。' +
-                       '升级前已留回滚点;确认后可再点一次同步保存新版数据。' });
+    Modal.note({ title: '策略与交易限制已升级',
+                 body: '历史余额、成交金额和目标比例没有修改，不用重记。旧未执行计划已暂停重评，不代表达标。' +
+                       '请到设置选择年度检查日，并核实基金申购状态、平台和限额；未核实不会生成买入。' +
+                       (booted.migrated.indexOf('1→2') >= 0 ? '同日盘点后的买卖归期也已修复，下次照实录余额即可。' : '') +
+                       '升级前已留本机回滚点；确认无误后可手动同步新版数据，其他设备需先刷新应用。' });
   }
 
   // 离线缓存 —— 只在 https / localhost 上装得起来,

@@ -13,6 +13,7 @@ var Config = (function () {
   var DEFAULTS = {
     targets: {}, funds: [], retired: [], locked: [],
     cashFloor: 0, cashTarget: 0.05, band: 0.05, minBuy: 1000,
+    reviewPolicy: { annualDate: '', halfEnabled: true }, buyFundByCategory: {},
   };
 
   function get() {
@@ -34,8 +35,7 @@ var Config = (function () {
 
   function save(patch) {
     var s = Object.assign(get(), patch);
-    Store.set('settings', s);
-    return s;
+    return Store.set('settings', s) === false ? null : s;
   }
 
   /** 加一只 / 改一只。按 code 认人。
@@ -44,28 +44,40 @@ var Config = (function () {
     var s = get();
     var list = (s.funds || []).slice();
     if (!f || typeof f.code !== 'string' || !f.code.trim()) return { ok: false, why: '没有基金代码' };
+    if (f.trade !== undefined && !Trading.valid(f.trade)) return { ok: false, why: '交易限制无效，请核对状态、额度和日期' };
 
     var i = list.findIndex(function (x) { return x.code === f.code; });
     if (isNew && i >= 0) return { ok: false, why: '代码 ' + f.code + ' 已经在清单里了' };
+    if (!isNew && f._oldCode && f._oldCode !== f.code && i >= 0) return { ok: false, why: '新代码已存在，不能覆盖另一只基金的配置' };
     // 又买回来了 —— 从退役名单里捞出来,别留两份定义
     var retired = (s.retired || []).filter(function (x) { return x.code !== f.code; });
-    if (retired.length !== (s.retired || []).length) save({ retired: retired });
 
     // 改代码的情况:老的那条要挪走,不能留下两条
     if (!isNew && f._oldCode && f._oldCode !== f.code) {
       var j = list.findIndex(function (x) { return x.code === f._oldCode; });
-      if (j >= 0) list.splice(j, 1);
+      if (j >= 0) {
+        var old = list[j];
+        retired = retired.filter(function (x) { return x.code !== old.code; });
+        retired.push({ code: old.code, name: old.name, category: old.category });
+        list.splice(j, 1);
+      }
       i = -1;
     }
     var clean = {};
-    // ⚠️ 白名单**只有四个字段**。早先还有 dailyLimit / active / status,
-    //    但前者你不再受限额约束,后两者和 primary 说的是同一件事。
-    //    留着不用的字段比删掉更糟:每次加基金都要面对几个不知道干嘛的开关。
-    ['code', 'name', 'category', 'primary']
+    if (i >= 0 && list[i].trade && f.trade === undefined) clean.trade = list[i].trade;
+    // 交易限制与持仓多少不是同一状态。350d448 删除限额时误把它们合并了。
+    ['code', 'name', 'category', 'primary', 'trade']
       .forEach(function (k) { if (f[k] !== undefined && f[k] !== null) clean[k] = f[k]; });
     if (i >= 0) list[i] = clean; else list.push(clean);
-    save({ funds: list });
+    if (!save({ funds: list, retired: retired })) return { ok: false, why: '配置保存失败，未改动基金清单' };
     return { ok: true };
+  }
+
+  function chooseBuyFund(category, code) {
+    var s = get(), selected = Object.assign({}, s.buyFundByCategory || {});
+    if (code && !(s.funds || []).some(function (f) { return f.code === code && f.category === category; })) return { ok: false, why: '只能选择同类别的现役基金' };
+    if (code) selected[category] = code; else delete selected[category];
+    return save({ buyFundByCategory: selected }) ? { ok: true } : { ok: false, why: '买入通道保存失败' };
   }
 
   /** 从清单里去掉一只。**历史快照一个字不动。**
@@ -121,7 +133,7 @@ var Config = (function () {
   }
 
   return { DEFAULTS: DEFAULTS, get: get, save: save, allKnown: allKnown,
-           upsertFund: upsertFund, removeFund: removeFund,
+           upsertFund: upsertFund, removeFund: removeFund, chooseBuyFund: chooseBuyFund,
            addCategory: addCategory, removeCategory: removeCategory,
            targetSum: targetSum };
 })();

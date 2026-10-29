@@ -65,6 +65,7 @@ var Modal = (function () {
   }
 
   function head(box, title, hint) {
+    box.setAttribute('aria-label', title);
     box.appendChild(h('div', { class: 'modal-title' }, [title]));
     if (hint) box.appendChild(h('div', { class: 'modal-hint' }, [hint]));
   }
@@ -214,7 +215,7 @@ var Modal = (function () {
 
       (o.fields || []).forEach(function (f) {
         var row = h('div', { style: 'margin-top:12px' });
-        row.appendChild(h('label', { class: 'lab' }, [
+        row.appendChild(h('label', { class: 'lab', 'for': 'modal-field-' + f.key }, [
           f.label,
           f.hint ? h('span', { class: 'dim', style: 'font-weight:400' },
                      ['  ' + f.hint]) : null,
@@ -222,6 +223,7 @@ var Modal = (function () {
         var input;
         if (f.type === 'select') {
           input = h('select', {
+            id: 'modal-field-' + f.key,
             onchange: function (e) { vals[f.key] = e.target.value; },
           });
           (f.options || []).forEach(function (op) {
@@ -234,13 +236,15 @@ var Modal = (function () {
           if (!vals[f.key] && (f.options || []).length) vals[f.key] = f.options[0].key;
         } else {
           input = h('input', {
-            type: f.type === 'number' ? 'number' : 'text',
+            type: f.type === 'number' ? 'number' : f.type === 'date' ? 'date' : 'text',
+            id: 'modal-field-' + f.key,
             inputmode: f.mode || (f.type === 'number' ? 'decimal' : null),
             value: vals[f.key] == null ? '' : String(vals[f.key]),
             placeholder: f.placeholder || '',
             oninput: function (e) { vals[f.key] = e.target.value; },
           });
         }
+        input.setAttribute('aria-label', f.label);
         row.appendChild(input);
         box.appendChild(row);
       });

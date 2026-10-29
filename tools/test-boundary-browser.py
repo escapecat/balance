@@ -23,7 +23,8 @@ def check(browser, url):
       const prior = new Date(now); prior.setDate(prior.getDate()-30);
       const before = prior.getFullYear() + '-' + String(prior.getMonth()+1).padStart(2,'0') + '-' + String(prior.getDate()).padStart(2,'0');
       Store.set('settings', {targets:{stock:0.5,bond:0.45},cashTarget:0.05,cashFloor:0,minBuy:100,band:0.05,
-        funds:[{code:'A',name:'Synthetic stock',category:'stock',primary:true},{code:'B',name:'Synthetic bond',category:'bond',primary:true}]});
+        funds:[{code:'A',name:'Synthetic stock',category:'stock',primary:true,trade:{status:'open',platform:'Synthetic platform',checkedOn:day}},
+               {code:'B',name:'Synthetic bond',category:'bond',primary:true,trade:{status:'open',platform:'Synthetic platform',checkedOn:day}}]});
       Actions.startFrom(before);
       Ledger.commit({date:before,holdings:{A:80000,B:80000},cash:{c:40000},external:{}});
       Ledger.commit({date:day,holdings:{A:80000,B:80000},cash:{c:40000},external:{}});
@@ -75,8 +76,8 @@ def check(browser, url):
       Store.set('__meta',{schema:1});
     }""", dates)
     page.reload()
-    expect(page.get_by_text("同日买卖归期已修复", exact=True)).to_be_visible()
-    assert page.evaluate("Store.get('__meta').schema") == 2
+    expect(page.get_by_text("策略与交易限制已升级", exact=True)).to_be_visible()
+    assert page.evaluate("Store.get('__meta').schema === Store.SCHEMA")
     assert page.evaluate("Store.getRollback().version") == 1
     assert page.evaluate("Actions.between(Store.get('snapshots')[1],null).length") == 1
     assert page.evaluate("Ledger.delta(Store.get('snapshots')[1],Store.get('snapshots')[0]).market") == 0

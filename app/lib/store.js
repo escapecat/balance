@@ -20,11 +20,20 @@ var Store = (function () {
   //    读到 undefined,当成「这项没填」照样往下算,数字全变但一个错都不报。
   //    而代码是自动更新的(GitHub Pages + Service Worker)——
   //    你某天打开发现总额不对,根本想不到是三天前我改了个字段名。
-  var SCHEMA = 2;
+  var SCHEMA = 3;
 
   // 版本 n → n+1 的升级函数。**只往前,不回退。**
   // 每条都要能重复跑而结果不变(万一中途失败重来一次)。
   var MIGRATE = {
+    2: function (data) {
+      // 不猜旧基金的当前额度、不改快照与成交。旧未执行计划必须重新评估。
+      (data.todos || []).forEach(function (t) {
+        if (t && (t.status === 'open' || t.status === 'partial')) {
+          t.status = 'held'; t.reason = '策略升级后待重新评估，历史成交保留';
+        }
+      });
+      return data;
+    },
     1: function (data) {
       var flows = data.flows || [], todos = data.todos || [];
       flows.forEach(function (f) {
@@ -151,6 +160,9 @@ var Store = (function () {
           if (list[f] === null) { emptyFunds++; continue; } // 兼容旧备份，读取时忽略，不改账。
           if (!list[f] || typeof list[f].code !== 'string' || !list[f].code.trim()) {
             return { ok: false, why: field + ' 中有缺少有效代码的基金，请先检查备份' };
+          }
+          if (list[f].trade !== undefined && (typeof Trading === 'undefined' || !Trading.valid(list[f].trade))) {
+            return { ok: false, why: field + ' 中的交易限制无效，请检查申购状态、限额与核实日期' };
           }
         }
       }

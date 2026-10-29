@@ -119,12 +119,23 @@ var Portfolio = (function () {
    *     只守科目的话,你哪天忘了标记就一点保护都没有。
    */
   function investableCash(snap, settings) {
+    return cashState(snap, settings).investable;
+  }
+
+  function cashState(snap, settings) {
     var cash = sum(snap.cash || {});
     var total = sum(snap.holdings || {}) + cash;
     var floor = settings.cashFloor || 0;
-    var byTarget = (settings.cashTarget != null ? settings.cashTarget : 0) * total;
+    var byTarget = (settings.cashTarget != null ? settings.cashTarget : 0.05) * total;
     var byBucket = bufferCash(snap, settings);
-    return Math.max(0, cash - Math.max(floor, byTarget, byBucket));
+    var required = Math.max(floor, byTarget, byBucket), ready = 0;
+    Object.keys(snap.cash || {}).forEach(function (k) {
+      var b = bucketOf(settings, k);
+      if (b.role === 'investable' && b.settleDays === 0) ready += snap.cash[k];
+    });
+    var investable = Math.max(0, cash - required);
+    return { cash: cash, required: required, kept: Math.min(cash, required), investable: investable,
+      liquid: Math.min(investable, Math.max(0, ready - Math.max(0, required - byBucket))) };
   }
 
   /** 今天就能动的钱 —— 可投科目里**当天到账**的那部分。
@@ -135,17 +146,7 @@ var Portfolio = (function () {
    *     月月宝赎回要 2 天,那笔钱该投,但今天到不了账。
    *     不区分的话清单上会写「今天可以做完」,而你今天做不到。 */
   function liquidNow(snap, settings) {
-    var c = snap.cash || {}, n = 0;
-    Object.keys(c).forEach(function (k) {
-      var b = bucketOf(settings, k);
-      if (b.role === 'investable' && b.settleDays === 0) n += c[k];
-    });
-    // 留下的那部分优先从「不投」的科目扣,扣不完的再从可投里扣
-    var keep = Math.max(0, Math.max(settings.cashFloor || 0,
-                                    (settings.cashTarget || 0) *
-                                      (sum(snap.holdings || {}) + sum(c)))
-                           - bufferCash(snap, settings));
-    return Math.max(0, n - keep);
+    return cashState(snap, settings).liquid;
   }
 
   /** 要等几天才到账的钱,按天数分组 —— 界面上要说清「先赎回,X 天后能买」。 */
@@ -162,7 +163,7 @@ var Portfolio = (function () {
 
   return { knownFunds: knownFunds, byCategory: byCategory, sum: sum, summarize: summarize,
            investableCash: investableCash, bucketOf: bucketOf,
-           bufferCash: bufferCash, liquidNow: liquidNow, pending: pending };
+           bufferCash: bufferCash, cashState: cashState, liquidNow: liquidNow, pending: pending };
 })();
 
 if (typeof module !== 'undefined') module.exports = Portfolio;

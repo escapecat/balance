@@ -18,7 +18,7 @@ var NowUI = (function () {
   //    再平衡建议依附于「刚录完一期」这个事件，做完就该结束；
   //    而它常驻首屏的话，一个月里剩下的 29 天你每次打开都被同一份
   //    已经做完的清单挡着，久了就自动忽略 —— 那它该提醒你的时候也提醒不动了。
-  var el, onEntry = null;
+  var el, onEntry = null, onSettings = null;
   var view = 'home';
   var pendingPlan = false;   // 刚存完一期 —— 下次 mount 直接进方案屏
 
@@ -160,9 +160,14 @@ var NowUI = (function () {
       h('button', { class: 'btn', onclick: onEntry }, [c.stale ? '录这个月的数字' : '录入最新余额']),
       h('button', { class: 'btn ghost', onclick: recordOne }, ['记一笔买卖']),
     ]));
-    var open = Todos.open().length;
+    var key = Allocate.contextKey(c.snap, c.st);
+    var open = Todos.open().filter(function (t) {
+      return t.version === 3 && t.contextKey === key && t.executionDate === today() &&
+        (t.kind !== 'sell' || Strategy.approved(c.snap, c.st, today()));
+    }).length;
     w.appendChild(h('button', { class: 'link', style: 'width:100%;margin-top:8px', onclick: function () { view = 'plan'; render(); } },
       [open ? '这个月该做什么 · 还欠 ' + open + ' 件 ›' : '这个月该做什么 ›']));
+    reviewCard(w, c);
     var allocation = h('details', { class: 'secondary-details' }, [h('summary', {}, ['盘点时的配置 · 全部 ' + c.sm.rows.length + ' 类'])]);
     c.sm.rows.forEach(function (r) {
       allocation.appendChild(h('div', { class: 'allocation-row', style: '--c:' + Palette.color(r.category) }, [
@@ -196,10 +201,137 @@ var NowUI = (function () {
         '。仅在这笔交易实际没有发生时删除。真实成交不能当误记删掉。', ok: '删除误记', danger: true,
     }).then(function (yes) {
       if (!yes) return;
-      var todo = Todos.all().filter(function (t) { return t.id === a.todoId && t.lastSnap === a.planDate; })[0];
+      var todo = Todos.all().filter(function (t) { return t.id === a.todoId && (a.planKey ? t.contextKey === a.planKey : t.lastSnap === a.planDate); })[0];
       if (todo) Todos.undo(todo.id); else Actions.remove(a.id);
       render();
     });
+  }
+
+  function reviewCard(w, c) {
+    var sc = Strategy.schedule(c.st, today());
+    var annual = sc.annualDue || sc.annualRecheck;
+    var box = h('div', { class: 'policy-card' }, [h('b', {}, ['新钱每月补仓 · 正式调整每年评估'])]);
+    box.appendChild(h('div', { class: 'hint' }, [!sc.configured ? '还没设首次年度检查日。日常补仓仍可用，不会自动卖出。'
+      : sc.annualRecheck ? '上次年度计划尚未执行完，日期或余额已变化；重新检查后才能继续。'
+      : sc.annualDue ? '年度检查已到期；先检查，不代表必须交易。'
+      : sc.halfDue ? '半年中途检查已到期；只留痕，不自动交易。'
+      : '年度检查 ' + sc.annualDate + (sc.halfDate ? ' · 半年提醒 ' + sc.halfDate : '')]));
+    box.appendChild(h('button', { class: 'link', onclick: function () {
+      if (!sc.configured) { onSettings(); return; }
+      view = annual ? 'annual' : 'half'; render();
+    } }, [!sc.configured ? '去设置检查日 ›' : annual ? '开始年度检查 ›' : sc.halfDue ? '开始半年检查 ›' : '查看检查安排 ›']));
+    w.appendChild(box);
+  }
+
+  function pendingRows(w, pending) {
+    pending.forEach(function (a) {
+      w.appendChild(h('button', { class: 'history-card', onclick: function () { removeAct(a); } }, [
+        h('b', {}, [(a.kind === 'sell' ? '已记卖出 ' : a.kind === 'dividend' ? '已记现金分红 ' : '已记买入 ') + (a.category || a.code)]),
+        h('div', { class: 'hint amount' }, [a.date + ' · ¥' + money(a.amount) + ' · 点击核对误记；不要重复记录']),
+      ]));
+    });
+  }
+
+  function renderExecution(w, c) {
+    var date = today(), key = Allocate.contextKey(c.snap, c.st), pending = Strategy.pending(c.snap);
+    if (c.stale || c.snap.date > date || Allocate.configurationIssue(c.st)) {
+      w.appendChild(h('div', { class: 'note warn' }, [c.stale || c.snap.date > date ? '余额不是近期有效盘点，先更新真实余额；本页不生成可执行计划。' : Allocate.configurationIssue(c.st) + '；暂不生成计划。']));
+      return false;
+    }
+    if (pending.some(function (a) { return a.planKey !== key || a.date !== date; })) {
+      w.appendChild(h('div', { class: 'note warn' }, ['有待对账买卖，先录入已包含这些交易的真实余额，再生成新方案。不要重复执行旧余额的建议。']));
+      pendingRows(w, pending);
+      w.appendChild(h('button', { class: 'btn', onclick: onEntry }, ['录入最新余额']));
+      return false;
+    }
+    if (pending.length) w.appendChild(h('div', { class: 'note' }, ['以下仍是本次盘点的同一份计划，做过的已保留。全部成交并到账后更新余额，不会把剩余待投资金自动变成新买入。']));
+    var approved = Strategy.approved(c.snap, c.st, date);
+    var mode = Allocate.suggestMode(c.snap, c.st);
+    var plan = approved ? Allocate.planAnnual(c.snap, c.st, date)
+      : mode.mode === 'monthly' ? Allocate.planMonthly(c.snap, c.st, date, Actions.all().filter(function (f) { return f.planKey !== key; })) : null;
+    if (!plan) { w.appendChild(h('div', { class: 'note' }, [mode.why])); return; }
+    Todos.sync(plan, c.snap.date, date);
+    var by = {}; Todos.all().forEach(function (t) { by[t.id] = t; });
+    if (approved) {
+      w.appendChild(h('h2', {}, ['已确认的年度卖出计划']));
+      w.appendChild(h('div', { class: 'note warn' }, ['只生成卖出待办，不是成交。授权仅对今天当前盘点和配置有效；隔天或数据变化后重新检查。卖出款实际到账、重新盘点后，才按新余额与申购限制计算买入。']));
+      var sells = h('div', { class: 'list' });
+      plan.sells.forEach(function (x) { sells.appendChild(todoRow(by[Todos.keyOf('sell', x.fund.code)], x, x.fund.name || x.fund.code, '卖 ' + x.category)); });
+      w.appendChild(sells); return;
+    }
+    var hero = h('div', { class: 'strategy-summary' }, [
+      h('span', { class: 'hint' }, ['今天可执行的买入 · 计划，不是成交']),
+      h('div', { class: 'strategy-amount amount' }, ['¥' + money(plan.spentToday)]),
+      h('div', { class: 'hint' }, ['本次分配 ¥' + money(plan.budget) + ' · 受限待投 ¥' + money(plan.restrictedAmount) + ' · 待到账 ¥' + money(plan.waitingCash)]),
+    ]);
+    w.appendChild(h('h2', {}, ['日常新钱补仓 · 只买不卖'])); w.appendChild(hero);
+    w.appendChild(h('div', { class: 'cash-breakdown' }, [
+      h('span', {}, ['盘点现金 ¥' + money(c.sm.cash)]), h('span', {}, ['保留 ¥' + money(c.sm.cash - plan.cashAvailable)]),
+      h('span', {}, ['可投 ¥' + money(plan.cashAvailable)]), h('span', {}, ['今天可用 ¥' + money(plan.liquidNow)]),
+    ]));
+    plan.rows.filter(function (r) { return r.budget > 0; }).forEach(function (r) {
+      var card = h('section', { class: 'equation-card' }, [
+        h('h2', {}, [r.category]),
+        h('div', { class: 'hint' }, ['目标缺口 ¥' + money(r.need) + ' · 本次分配 ¥' + money(r.budget)]),
+      ]);
+      if (r.today > 0) card.appendChild(todoRow(by[Todos.keyOf('buy', r.fund.code)], { category: r.category, amount: r.today }, (r.fund.name || r.fund.code) + ' · ' + (r.limit.platform || ''), '今天买 ' + r.category));
+      else card.appendChild(h('div', { class: 'equation-row' }, [h('span', {}, ['今天能买']), h('b', {}, ['¥0'])]));
+      if (r.restricted) card.appendChild(h('div', { class: 'pending-label' }, ['受限待投 ¥' + money(r.restricted) + ' · ' + r.limit.why]));
+      if (r.waitingCash) card.appendChild(h('div', { class: 'pending-label' }, ['待到账 ¥' + money(r.waitingCash) + ' · 赎回并实际到账后更新余额，不按天数自动解锁']));
+      w.appendChild(card);
+    });
+    if (plan.pendingAmount) w.appendChild(h('div', { class: 'note' }, ['待投资金仍是现金，不算已补齐，不自动改买其他类别。下次补仓核实限制再计算；若连续多期受限，评估同指数其他通道，不承诺固定几天买完。']));
+    if (!plan.rows.length) w.appendChild(h('div', { class: 'note' }, ['当前没有可补的类别缺口。']));
+    if (plan.restrictedAmount) w.appendChild(h('button', { class: 'btn ghost', onclick: onSettings }, ['去设置核实基金与交易限制']));
+    if (plan.shortfall > 0) w.appendChild(h('div', { class: 'hint', style: 'margin-top:12px' }, ['全部目标缺口仍差 ¥' + money(plan.shortfall) + '，不靠卖出旧仓填本月预算。']));
+  }
+
+  function renderReview(w, c) {
+    var date = today(), sc = Strategy.schedule(c.st, date), half = view === 'half', checks = [false, false, false];
+    w.appendChild(h('h1', {}, [half ? '半年检查' : '年度评估']));
+    w.appendChild(h('p', { class: 'sub' }, [half ? '检查不是交易；不因检查完成生成买卖' : '日期到期只是检查入口，不代表必须卖出']));
+    w.appendChild(h('div', { class: 'policy-card' }, [h('b', {}, [sc.configured ? '年度 ' + sc.annualDate + (sc.halfDate ? ' · 半年 ' + sc.halfDate : '') : '尚未设置首次检查日'])]));
+    var why = Strategy.block(c.snap, date) || Allocate.configurationIssue(c.st);
+    if (why) { w.appendChild(h('div', { class: 'note warn' }, [why])); w.appendChild(h('button', { class: 'btn', onclick: onEntry }, ['录入最新余额'])); }
+    else if (half) {
+      var done = h('button', { class: 'btn', disabled: 'disabled', onclick: function () {
+        if (!checks.every(Boolean)) return;
+        finishReview('half', 'checked', c);
+      } }, ['本次已检查，不交易']);
+      ['生活与应急现金足够，近期用途没有变化', '目标配置仍符合自己的风险承受能力', '已看过偏离与交易限制，不需要自动买卖'].forEach(function (label, i) {
+        w.appendChild(h('label', { class: 'review-check' }, [h('input', { type: 'checkbox', onchange: function (e) { checks[i] = e.target.checked; done.disabled = !checks.every(Boolean) || !sc.halfDue; } }), h('span', {}, [label])]));
+      });
+      if (!sc.halfDue) w.appendChild(h('div', { class: 'note' }, ['半年检查尚未到期或已经记过。本页可查看安排，不会重复留痕。']));
+      w.appendChild(done);
+    } else {
+      var a = Allocate.planAnnual(c.snap, c.st, date), newMoney = Allocate.suggestMode(c.snap, c.st).mode === 'monthly';
+      w.appendChild(h('div', { class: 'note' }, [newMoney ? '先投新钱，暂不卖旧仓。成交到账、更新余额后再评估是否还需要卖出。' : a.inBand ? '各类超配未越过偏差带，本次无需生成卖出。' : '有类别超过偏差带；先看预览，是否交易由你确认。']));
+      if (!newMoney) {
+        a.sells.forEach(function (x) { w.appendChild(h('div', { class: 'equation-row' }, [h('span', {}, ['预览卖出 · ' + x.category]), h('b', {}, ['¥' + money(x.amount)])])); });
+        if (a.buys.length) {
+          w.appendChild(h('h2', {}, ['到账后的资金去向 · 仅预览']));
+          a.buys.forEach(function (x) { w.appendChild(h('div', { class: 'equation-row' }, [h('span', {}, [x.category]), h('b', {}, ['约 ¥' + money(x.amount)])])); });
+          w.appendChild(h('div', { class: 'hint' }, ['这不是买入待办。真实卖出金额、到账、费用与届时限购都会影响下一步；受限部分可能暂留现金。']));
+        }
+        if (a.retainedCash > 0) w.appendChild(h('div', { class: 'equation-row' }, [h('span', {}, ['预留现金']), h('b', {}, ['约 ¥' + money(a.retainedCash)])]));
+        (a.skipped || []).forEach(function (x) { w.appendChild(h('div', { class: 'note warn' }, [(x.fund ? x.fund.name || x.fund.code : x.category) + '：' + x.why])); });
+      }
+      if ((sc.annualDue || sc.annualRecheck) && !newMoney && a.sells.length) w.appendChild(h('button', { class: 'btn', onclick: function () {
+        Modal.confirm({ title: '确认生成年度卖出计划？', body: '请先核对锁定期、赎回费用与资金到账。确认仅生成卖出待办，不是已经成交。卖出款到账并更新余额后才算买入；限购时可能继续持有待投资金。', ok: '确认生成卖出计划' }).then(function (yes) { if (yes) finishReview('annual', 'approved', c); });
+      } }, ['预览确认后，生成卖出计划']));
+      if (sc.annualDue || sc.annualRecheck) w.appendChild(h('button', { class: 'btn ghost', onclick: function () {
+        Modal.confirm({ title: '本次检查完成，暂不交易？', body: '只记录检查结果，并安排下一次年度检查；不写买卖流水。', ok: '确认检查完成' }).then(function (yes) { if (yes) finishReview('annual', 'no-trade', c); });
+      } }, ['检查完成，暂不交易']));
+    }
+    w.appendChild(h('button', { class: 'link', onclick: function () { view = 'home'; render(); } }, ['返回现在']));
+  }
+  function finishReview(kind, decision, c) {
+    // 弹窗期间数据可能从另一设备更新，旧上下文不能用来签发授权。
+    var snap = Ledger.latest(Store.get('snapshots', []) || []), settings = Config.get();
+    if (Allocate.contextKey(snap, settings) !== Allocate.contextKey(c.snap, c.st)) { Modal.note({ title: '余额或配置已变化', body: '请重新打开检查，不复用旧预览。' }); render(); return; }
+    var r = Strategy.review(kind, decision, snap, settings, today());
+    if (!r.ok) { Modal.note({ title: '还不能记为完成', body: r.why }); return; }
+    view = decision === 'approved' ? 'plan' : 'home'; render();
   }
 
   var lastView = null;   // 换了一屏才回顶部，重渲染不动
@@ -245,8 +377,10 @@ var NowUI = (function () {
     var ctx = { st: st, snaps: snaps, snap: snap, sm: sm, ext: ext,
                 extBlank: extBlank, age: age, stale: stale };
     if (view === 'home') { renderHome(w, ctx); el.appendChild(w); return; }
+    if (view === 'half' || view === 'annual') { renderReview(w, ctx); el.appendChild(w); return; }
 
-    w.appendChild(heroBlock(ctx, false));
+    w.appendChild(h('h1', {}, ['本次执行计划']));
+    w.appendChild(h('p', { class: 'sub' }, [snap.date + ' 盘点 · 组合 ¥' + money(sm.total) + ' · 非实时余额']));
 
     if (extBlank.length) {
       w.appendChild(h('div', {
@@ -266,95 +400,9 @@ var NowUI = (function () {
 
     var body = h('div', stale ? { style: 'opacity:.6' } : {});
 
-    var unaccounted = Actions.between(snap, null).filter(function (a) { return Actions.MONEY[a.kind]; });
-    // 本期 todo 以稳定 id 防重；临时记的或来自旧期的交易不能据旧余额生成新计划。
-    if (unaccounted.some(function (a) { return !a.todoId || a.planDate !== snap.date; })) {
-      w.appendChild(h('div', { class: 'note warn' }, ['有待对账买卖，先录入已包含这些交易的真实余额，再生成新方案。不要重复执行旧余额的建议。']));
-      unaccounted.forEach(function (a) {
-        w.appendChild(h('button', { class: 'history-card', onclick: function () { removeAct(a); } }, [
-          h('b', {}, [(a.kind === 'sell' ? '卖出 ' : a.kind === 'dividend' ? '现金分红 ' : '买入 ') + (a.category || a.code)]),
-          h('div', { class: 'hint amount' }, [a.date + ' · ¥' + money(a.amount) + ' · 点此核对或删除误记']),
-        ]));
-      });
-      w.appendChild(h('button', { class: 'btn', onclick: onEntry }, ['录入最新余额']));
-      w.appendChild(h('button', { class: 'link', onclick: function () { view = 'home'; render(); } }, ['知道了']));
-      el.appendChild(w); return;
-    }
-    if (unaccounted.length) w.appendChild(h('div', { class: 'note' }, ['下面是同一次盘点生成的已有计划；做过的项目已保留完成状态，不是新一轮买入建议。']));
-
-    // ---- 该做什么 ----
-    //
-    // ⚠️ 计划算出来之后**立刻和待办对账**,再拿对账后的结果渲染 ——
-    //    不能一边显示 Allocate 的原始清单、一边另存一份待办。
-    //    那样勾掉的那条下次照样出现在清单里,而 todos 里静静记着 done。
-    var mode = Allocate.suggestMode(snap, st, today());
-    var plan = mode.mode === 'monthly' ? Allocate.planMonthly(snap, st)
-             : mode.mode === 'annual' ? Allocate.planAnnual(snap, st, today())
-             : null;
-    if (plan) Todos.sync(plan, snap.date, today());
-    var todoOf = {};
-    Todos.all().forEach(function (t) { todoOf[t.id] = t; });
-
-    if (mode.mode === 'monthly') {
-      var p = plan;
-      if (p.today.length) {
-        body.appendChild(h('h2', {}, ['今天可以做完',
-          h('span', { class: 'n' }, ['¥' + money(p.spentToday)])]));
-        var l1 = h('div', { class: 'list' });
-        p.today.forEach(function (t) {
-          l1.appendChild(todoRow(todoOf[Todos.keyOf('buy', t.fund.code)], t,
-                                 t.fund.name || t.fund.code));
-        });
-        body.appendChild(l1);
-      }
-      if (p.daily.length) {
-        body.appendChild(h('h2', {}, ['按日投']));
-        var l2 = h('div', { class: 'list' });
-        p.daily.forEach(function (d) {
-          l2.appendChild(todoRow(todoOf[Todos.keyOf('buy', d.fund.code)], d,
-                                 (d.fund.name || d.fund.code) + ' · 还要 ' + d.days +
-                                 ' 天,共 ¥' + money(d.amount),
-                                 d.category));
-        });
-        body.appendChild(l2);
-      }
-      if (p.shortfall > 0) {
-        body.appendChild(h('div', { class: 'note', style: 'margin-top:12px' }, [
-          '现金填不满全部缺口,还差 **¥' + money(p.shortfall) + '** —— 靠后面几个月的钱。',
-        ]));
-      }
-      if (!p.today.length && !p.daily.length) {
-        body.appendChild(h('div', { class: 'note' }, ['各类都到位了,这个月不用买。']));
-      }
-    } else if (mode.mode === 'annual') {
-      // ⚠️ 年度这一刀要卖东西,和月度补仓是**完全不同量级的决定**,
-      //    所以不直接铺清单,先说清为什么走到这一步。
-      body.appendChild(h('h2', {}, ['该做一次再平衡了']));
-      body.appendChild(h('div', { class: 'note warn' }, [mode.why]));
-      var a = plan;
-      var la = h('div', { class: 'list' });
-      a.sells.forEach(function (x) {
-        la.appendChild(todoRow(todoOf[Todos.keyOf('sell', x.fund.code)], x,
-                               x.fund.name || x.fund.code, '卖 ' + x.category));
-      });
-      a.buys.forEach(function (x) {
-        la.appendChild(todoRow(todoOf[Todos.keyOf('buy', x.fund.code)], x,
-                               (x.fund.name || x.fund.code) +
-                               (x.perDay ? ' · ' + x.days + ' 天投完' : ''),
-                               '买 ' + x.category));
-      });
-      body.appendChild(la);
-      (a.skipped || []).forEach(function (s2) {
-        body.appendChild(h('div', { class: 'note warn', style: 'margin-top:8px' }, [
-          (s2.fund ? (s2.fund.name || s2.fund.code) : s2.category) + ':' + s2.why,
-        ]));
-      });
-      body.appendChild(h('div', { class: 'hint', style: 'margin-top:8px' }, [
-        '卖多少买多少,现金不动 —— 这一刀只调比例,不投新钱。' +
-        '赎回费算不了(没有申购日期),动手前自己看一眼持有天数。',
-      ]));
-    } else {
-      body.appendChild(h('div', { class: 'note' }, [mode.why]));
+    if (renderExecution(body, ctx) === false) {
+      body.appendChild(h('button', { class: 'link', onclick: function () { view = 'home'; render(); } }, ['返回现在']));
+      w.appendChild(body); el.appendChild(w); return;
     }
 
     // ---- 配置 ----
@@ -543,6 +591,7 @@ var NowUI = (function () {
   }
 
   function tapTodo(t) {
+    if (t.status === 'held') { Modal.note({ title: '当前不可执行', body: '限制、余额或策略已变化。这不代表已达标；已真实成交的请单独记一笔。' }); return; }
     // 勾待办也会写一笔动作 —— 起点同样默认成最近一期对账日
     if (Actions.needsStart()) {
       var last0 = Ledger.latest(Store.get('snapshots', []) || []);
@@ -700,7 +749,8 @@ var NowUI = (function () {
           //    Todos.complete 内部会写流水,所以认领之后**不能再 add 一次**,
           //    否则一笔买入记两条,净买入翻倍,「市场涨跌」跟着错。
           var hit = Todos.open().filter(function (t) {
-            return t.code === f.code && t.kind === kind;
+            return t.code === f.code && t.kind === kind && (t.version !== 3 ||
+              (t.executionDate === today() && t.contextKey === Allocate.contextKey(Ledger.latest(Store.get('snapshots', []) || []), Config.get())));
           })[0];
           if (hit) {
             var r0 = Todos.complete(hit.id, amt, today());
@@ -721,6 +771,7 @@ var NowUI = (function () {
   function mount(node, opts) {
     el = node;
     onEntry = (opts || {}).onEntry || function () {};
+    onSettings = (opts || {}).onSettings || function () { Modal.note({ title: '到设置核实', body: '设置 → 执行策略 / 基金与交易限制。' }); };
     view = pendingPlan ? 'plan' : 'home';
     pendingPlan = false;
     render();

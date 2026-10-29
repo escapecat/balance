@@ -44,6 +44,17 @@ var Todos = (function () {
    *     你会以为自己刚才那一下没生效。
    */
   function sync(plan, snapDate, today) {
+    if (plan.mode === 'annual' && plan.version !== 3) return all();
+    if (plan.version === 3) {
+      var snap = Ledger.latest(Store.get('snapshots', []) || []), settings = Config.get();
+      if (plan.invalid || Allocate.configurationIssue(settings)) return all();
+      if (!snap || snap.date !== snapDate || plan.executionDate !== today ||
+          plan.contextKey !== Allocate.contextKey(snap, settings)) return all();
+      var age = (Date.parse(today) - Date.parse(snapDate)) / 864e5;
+      if (age < 0 || age > 25) return all();
+      if (Strategy.pending(snap).some(function (a) { return a.planKey !== plan.contextKey || a.date !== today; })) return all();
+      if (plan.mode === 'annual' && !Strategy.approved(snap, settings, today)) return all();
+    }
     var list = all().slice();
     var have = byKey(list);
     var wanted = {};
@@ -57,6 +68,8 @@ var Todos = (function () {
         name: x.fund.name || x.fund.code,
         target: x.amount, perDay: x.perDay || null, days: x.days || null,
         lastSnap: snapDate,
+        version: plan.version || 1, contextKey: plan.contextKey || null,
+        executionDate: plan.executionDate || null, mode: plan.mode || 'monthly',
       };
       if (!t) {
         list.push(Object.assign(fresh, {
@@ -67,6 +80,10 @@ var Todos = (function () {
       // ⚠️ 「不做了」的**永远不自动复活**。它是一个决定,不是一次遗漏 ——
       //    自动回来的话,那个体面的出口就成了摆设,你得每个月重新拒绝一次。
       if (t.status === 'dropped') { t.target = x.amount; t.lastSnap = snapDate; return; }
+      if (plan.version === 3 && (t.contextKey !== fresh.contextKey || t.status === 'held')) {
+        Object.assign(t, fresh, { status: 'open', actual: null, doneAt: null, reason: null });
+        return;
+      }
 
       // 还欠着 → 金额跟着重算,**bornAt 一个字不动**(它记的是「从哪天开始欠的」)
       if (OPEN[t.status]) {
@@ -108,19 +125,20 @@ var Todos = (function () {
 
     (plan.today || []).forEach(function (x) { want('buy', x); });
     (plan.daily || []).forEach(function (x) { want('buy', x); });
-    (plan.buys || []).forEach(function (x) { want('buy', x); });
+    if (plan.mode !== 'annual') (plan.buys || []).forEach(function (x) { want('buy', x); });
     (plan.sells || []).forEach(function (x) { want('sell', x); });
 
     // ⚠️ 计划里没有了,但还欠着 → 缺口是被**市值涨平**的,不是你做的。
     //    标 resolved,不标 done。
     list.forEach(function (t) {
       if (!wanted[t.id] && OPEN[t.status]) {
-        t.status = 'resolved';
+        t.status = plan.version === 3 ? 'held' : 'resolved';
+        if (plan.version === 3) t.reason = '当前不可执行，需重新核对限制或余额；不代表已达标';
         t.doneAt = today;
       }
     });
 
-    Store.set('todos', list);
+    if (Store.set('todos', list) === false) return all();
     return list;
   }
 
@@ -136,7 +154,16 @@ var Todos = (function () {
     var list = all().slice();
     var t = list.filter(function (x) { return x.id === id; })[0];
     if (!t) return { ok: false, why: '没有这条待办' };
-    if (typeof amount !== 'number' || isNaN(amount)) {
+    if (t.status === 'held' || t.status === 'resolved' || t.status === 'dropped') return { ok: false, why: '这条不是可执行待办；真实成交请单独记一笔' };
+    if (t.version === 3 && !currentFlows(t).length) {
+      var snap = Ledger.latest(Store.get('snapshots', []) || []), settings = Config.get();
+      if (!snap || t.executionDate !== today || t.contextKey !== Allocate.contextKey(snap, settings))
+        return { ok: false, why: '余额、配置或日期已变化，请重新核对计划；已经成交的可从「记一笔买卖」如实记录' };
+      if (Strategy.pending(snap).some(function (a) { return a.planKey !== t.contextKey || a.date !== today; }))
+        return { ok: false, why: '有其他待对账交易，请先更新真实余额' };
+      if (t.kind === 'sell' && !Strategy.approved(snap, settings, today)) return { ok: false, why: '年度卖出还没有得到这次余额下的明确确认' };
+    }
+    if (typeof amount !== 'number' || !isFinite(amount)) {
       return { ok: false, why: '得填实际金额 —— 现金流全靠它' };
     }
     if (amount <= 0) return { ok: false, why: '金额得大于 0;真没做就用「不做了」' };
@@ -145,13 +172,13 @@ var Todos = (function () {
     var result = previous.length
       ? Actions.updateAmount(previous[0].id, amount)
       : Actions.add({ date: today, kind: t.kind, category: t.category,
-                      code: t.code, amount: amount, todoId: t.id, planDate: t.lastSnap });
+                      code: t.code, amount: amount, todoId: t.id, planDate: t.lastSnap, planKey: t.contextKey });
     if (!result.ok) return result;
     t.actual = amount;
     t.doneAt = previous.length ? previous[0].date : today;
     t.status = amount + 1 < t.target ? 'partial' : 'done';
 
-    Store.set('todos', list);
+    if (Store.set('todos', list) === false) return { ok: false, why: '真实成交流水已保存，但待办状态写入失败；不要重复记录，请先导出备份并核对历史' };
 
     // 稳定 todo id 会跨月复用,绝不能因此删除上一轮真实买卖。
     return { ok: true, status: t.status };
@@ -159,6 +186,7 @@ var Todos = (function () {
 
   function currentFlows(t) {
     return Actions.all().filter(function (f) {
+      if (t.contextKey) return f.todoId === t.id && f.planKey === t.contextKey;
       return f.todoId === t.id && (f.planDate
         ? f.planDate === t.lastSnap
         : !!t.doneAt && f.date === t.doneAt && f.date >= t.lastSnap);

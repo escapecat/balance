@@ -33,7 +33,10 @@ var SettingsUI = (function () {
   }
   function pct(x) { return x == null ? '—' : (x * 100).toFixed(1).replace(/\.0$/, '') + '%'; }
   function st() { return Config.get(); }
-  function save(patch) { Config.save(patch); if (onChanged) onChanged(); render(); }
+  function save(patch) {
+    if (!Config.save(patch)) { Modal.note({ title: '设置未保存', body: '本机存储写入失败，原配置保留。请先导出备份并检查存储空间。' }); return false; }
+    if (onChanged) onChanged(); render(); return true;
+  }
 
   var lastView = null;   // 换了一屏才回顶部，重渲染不动
 
@@ -104,6 +107,8 @@ var SettingsUI = (function () {
     }
 
     // ---- 目标比例 ----
+    var root = w, sections = {};
+    w = settingGroup('02', '目标配置', '类别与现金一起凑 100%');
     //
     // ⚠️ **现金和其他类别列在一起,一起凑 100%。**
     //    早先现金的目标是单独一个设置(在下面「现金」那一段),
@@ -234,6 +239,8 @@ var SettingsUI = (function () {
     }, ['＋ 加一个类别']));
 
     // ---- 基金清单 ----
+    sections.targets = w;
+    w = settingGroup('04', '基金与交易限制', '申购状态、额度、平台与买入通道');
     //
     // ⚠️ **清仓的沉到底部并标出来。** 卖光了的基金还留在清单里,
     //    每次加新基金都要从它们中间划过去 —— 而它们已经不参与任何事了。
@@ -248,8 +255,8 @@ var SettingsUI = (function () {
     live.sort(function (a, b) { return (held[b.code] || 0) - (held[a.code] || 0); });
 
     // 每类持仓最大的那只 = 买入落点。**算出来的,不是标记出来的**
-    var mainOf = {};
-    live.forEach(function (f) { if (!mainOf[f.category]) mainOf[f.category] = f.code; });
+    var mainOf = Allocate.buyingOf(s, held);
+    Object.keys(mainOf).forEach(function (cat) { mainOf[cat] = mainOf[cat] ? mainOf[cat].code : ''; });
 
     w.appendChild(h('h2', {}, ['基金', h('span', { class: 'n' }, [live.length + ' 只'])]));
     var fl = h('div', { class: 'list' });
@@ -261,7 +268,10 @@ var SettingsUI = (function () {
           h('div', { class: 'ttl' }, [f.name || f.code]),
           h('div', { class: 'sub2' }, [
             f.code + ' · ' + f.category +
-            (mainOf[f.category] === f.code ? ' · 买入落这只' : ''),
+            (mainOf[f.category] === f.code ? ' · 当前买入通道' : '') +
+            ' · ' + Trading.LABELS[Trading.of(f).status] +
+            (Trading.of(f).status === 'limited' ? ' ¥' + money(Trading.of(f).dailyLimit) + '/日' : '') +
+            (Trading.of(f).checkedOn ? ' · 核实于 ' + Trading.of(f).checkedOn : ''),
           ]),
         ]),
         h('div', { class: 'amt dim' }, [
@@ -275,6 +285,14 @@ var SettingsUI = (function () {
       class: 'btn ghost', style: 'margin-top:8px',
       onclick: function () { editFund({}, true); },
     }, ['＋ 加一只基金']));
+    Object.keys(s.targets || {}).forEach(function (cat) {
+      var selected = mainOf[cat], fund = funds.filter(function (f) { return f.code === selected; })[0];
+      w.appendChild(h('button', { class: 'settings-route', onclick: function () {
+        Modal.pick({ title: cat + ' · 选择买入通道', hint: '同类别不代表同指数。请核对跟踪标的、费用与限制；不自动切换备选。',
+          options: [{ key: '__auto__', label: '默认：持仓最大的现役基金', hint: '若限购，不自动改选其他基金' }].concat(funds.filter(function (f) { return f.category === cat; }).map(function (f) { return { key: f.code, label: f.name || f.code, hint: f.code + ' · ' + Trading.LABELS[Trading.of(f).status] }; }))
+        }).then(function (code) { if (!code) return; var r = Config.chooseBuyFund(cat, code === '__auto__' ? '' : code); if (!r.ok) Modal.note({ title: '未更改', body: r.why }); render(); });
+      } }, [cat + ' 买入通道', h('span', {}, [(fund ? fund.name || fund.code : '待选择') + ' ›'])]));
+    });
 
     if (empty.length) {
       w.appendChild(h('h2', {}, ['已清仓', h('span', { class: 'n' }, [empty.length + ' 只'])]));
@@ -285,11 +303,11 @@ var SettingsUI = (function () {
       var el0 = h('div', { class: 'list' });
       empty.forEach(function (f) {
         el0.appendChild(h('div', {
-          class: 'list-row', onclick: function () { dropEmpty(f); },
+          class: 'list-row', onclick: function () { editFund(f, false); },
         }, [
           h('div', { class: 'body' }, [
             h('div', { class: 'ttl' }, [f.name || f.code]),
-            h('div', { class: 'sub2' }, [f.code + ' · ' + f.category + ' · 点一下删掉']),
+            h('div', { class: 'sub2' }, [f.code + ' · ' + f.category + ' · 点此编辑申购限制或删除']),
           ]),
           h('span', { class: 'chev' }),
         ]));
@@ -298,15 +316,16 @@ var SettingsUI = (function () {
     }
 
     // ---- 现金 ----
+    sections.funds = w;
+    w = settingGroup('03', '现金保护', '保留金、可投资金与到账状态');
     // ⚠️ 现金的**目标占比在上面「目标比例」里**(它是第七个类别)。
     //    这儿只剩「绝对下限」和「偏差带」——
     //    前者管的是「不管比例算出来多少,至少留这么多」,
     //    资产还小的时候比例算出来那点钱不够应急。
-    w.appendChild(h('h2', {}, ['现金']));
+    w.appendChild(h('h2', {}, ['现金保护']));
     w.appendChild(h('div', { class: 'list' }, [
       numItem('现金保底', '绝对下限。不管总额多少,至少留这么多', 'cashFloor', s.cashFloor, ''),
-      numItem('偏差带', '偏差超过这么多个百分点,年度再平衡才动手',
-              'band', Math.round((s.band || 0) * 1000) / 10, '%'),
+      numItem('日常补仓门槛', '可投资金低于此金额时先保留现金，不触发卖出', 'minBuy', s.minBuy, ''),
     ]));
     // ⚠️ 把两条设置**合起来的结果**算给人看,而且每个数都写清来源。
     //    只摆两个百分比的话,「所以我到底能投多少」得自己在脑子里算 ——
@@ -314,18 +333,34 @@ var SettingsUI = (function () {
     if (snap) {
       var byFloor = s.cashFloor || 0;
       var byRatio = (s.cashTarget || 0) * sm.total;
-      var keep = Math.max(byFloor, byRatio);
+      var byBuckets = Portfolio.bufferCash(snap, s);
+      var keep = Math.max(byFloor, byRatio, byBuckets);
       var which = byRatio >= byFloor
         ? '目标占比更严:' + pct(s.cashTarget) + ' × 组合 ' + money(sm.total)
         : '保底更严:' + money(byFloor) + ' 这个绝对数';
       w.appendChild(h('div', { class: 'hint' }, [
-        '你现在有现金 **¥' + money(sm.cash) + '**。按上面两条要留下 ' +
-        '**¥' + money(keep) + '** 不投(' + which + '),' +
+        '你盘点时有现金 **¥' + money(sm.cash) + '**。按底线、目标比例与备用科目取最大值，要留下 ' +
+        '**¥' + money(keep) + '** 不投(' + (byBuckets > Math.max(byFloor, byRatio) ? '备用金科目更严' : which) + '),' +
         '剩下 **¥' + money(Math.max(0, sm.cash - keep)) + '** 拿去买基金。',
       ]));
     }
+    var cashKeys = Object.keys(Object.assign({}, s.cashBuckets || {}, (snap || {}).cash || {}));
+    cashKeys.forEach(function (key) {
+      var b = Portfolio.bucketOf(s, key);
+      w.appendChild(h('button', { class: 'settings-route', onclick: function () {
+        Modal.form({ title: key + ' · 现金用途', hint: '待到账金额不会因过了几天自动解锁。真实赎回到账后，更新余额并把已到账资金记到当天可用科目。',
+          fields: [{ key: 'role', label: '用途', type: 'select', options: [{ key: 'buffer', label: '生活 / 应急保留金' }, { key: 'investable', label: '可投资金' }] },
+            { key: 'days', label: '到账等待天数', type: 'number', hint: '0 表示今天可用；大于 0 仅提示待到账' }],
+          values: { role: b.role, days: b.settleDays },
+          validate: function (v) { return /^\d+$/.test(String(v.days)) && Number(v.days) <= 365 ? null : '到账天数请填 0 到 365 的整数。'; }
+        }).then(function (v) { if (!v) return; var buckets = Object.assign({}, st().cashBuckets || {}); buckets[key] = { role: v.role, settleDays: Number(v.days) }; save({ cashBuckets: buckets }); });
+      } }, [key, h('span', {}, [b.role === 'buffer' ? '保留，不投 ›' : b.settleDays ? '待到账 ' + b.settleDays + ' 天 ›' : '可投 · 今天可用 ›'])]));
+    });
+    w.appendChild(h('div', { class: 'hint' }, ['受限待投仍属于现金资产，但不冒充应急金；各项保护不重复相加。']));
 
     // ---- 组合之外 ----
+    sections.cash = w;
+    w = settingGroup('', '组合外资产', '仅管理名目；金额在录入页填');
     //
     // ⚠️ 这里只改**名目**(叫什么、算哪一类)。金额在录入页填 ——
     //    和基金持仓同一条路,同一期的数字待在同一条快照里。
@@ -356,6 +391,15 @@ var SettingsUI = (function () {
     }, ['＋ 加一项']));
 
     // ---- 数据与备份 ----
+    sections.assets = w;
+    w = root;
+    w.appendChild(strategySettings(s));
+    w.appendChild(sections.targets);
+    w.appendChild(sections.cash);
+    w.appendChild(sections.funds);
+    var dataGroup = settingGroup('05', '数据与同步', '备份、同步、历史完整性与组合外资产');
+    root.appendChild(dataGroup); w = dataGroup;
+    w.appendChild(sections.assets);
     //
     // ⚠️ 版本号、导出导入、回滚点、买卖记录起点 —— 这四样**都是低频的**，
     //    有的一年用一次，有的一次都不用。可它们原先各占一个板块摊在一级页上，
@@ -376,7 +420,35 @@ var SettingsUI = (function () {
       ]),
     ]));
 
-    el.appendChild(w);
+    el.appendChild(root);
+  }
+
+  function settingGroup(n, title, detail) {
+    return h('details', { class: 'settings-section' }, [h('summary', {}, [
+      h('span', { class: 'settings-number' }, [n]), h('span', {}, [h('b', {}, [title]), h('small', {}, [detail])]),
+    ])]);
+  }
+  function strategySettings(s) {
+    var p = Strategy.policy(s), sc = Strategy.schedule(s, Trading.today());
+    var box = h('section', { class: 'settings-strategy' }, [h('h2', {}, ['01 · 执行策略']),
+      h('p', { class: 'hint' }, ['新钱每月只买不卖；年度到期先检查，只有明确确认后才生成卖出。提醒只在打开应用时展示，不是系统推送。'])]);
+    box.appendChild(h('button', { class: 'settings-route', onclick: function () {
+      Modal.form({ title: '年度与半年检查', hint: '首次检查日由你决定，不从建仓或盘点日期猜算。清空日期只停用日程，不阻止日常补仓。',
+        fields: [{ key: 'date', label: '年度检查锚点日期', type: 'date', hint: '首次检查日期；后续按检查记录顺延' },
+          { key: 'half', label: '半年中途检查', type: 'select', options: [{ key: 'yes', label: '开启 · 提前六个月，只检查不自动交易' }, { key: 'no', label: '关闭' }] }],
+        values: { date: p.annualDate, half: p.halfEnabled ? 'yes' : 'no' },
+        validate: function (v) { return !v.date || Trading.isDate(v.date) ? null : '请选择有效日期。'; }
+      }).then(function (v) { if (v) save({ reviewPolicy: { annualDate: v.date, halfEnabled: v.half === 'yes' } }); });
+    } }, ['年度检查', h('span', {}, [sc.annualDate || '待设置', ' ›'])]));
+    box.appendChild(h('div', { class: 'hint' }, [sc.halfDate ? '半年提醒 ' + sc.halfDate + '；月末日期按目标月最后一天处理。' : '未设年度日期时，不推算半年检查。']));
+    box.appendChild(numItem('偏差带', '年度评估时检查绝对偏离百分点；不是每月自动卖出阈值', 'band', Math.round(s.band * 1000) / 10, '%'));
+    var log = Strategy.reviews();
+    if (log.length) {
+      var details = h('details', { class: 'secondary-details' }, [h('summary', {}, ['检查记录 · ' + log.length + ' 次'])]);
+      log.slice().reverse().forEach(function (r) { details.appendChild(h('div', { class: 'hint', style: 'padding:8px 0' }, [r.date + ' · ' + (r.kind === 'half' ? '半年检查完成，无交易' : r.decision === 'approved' ? '年度已检查，确认生成卖出计划（不是成交）' : '年度已检查，暂不交易')])); });
+      box.appendChild(details);
+    }
+    return box;
   }
 
   /** 配同步 —— **token 必须你自己去生成**,我没法替你点那几下。 */
@@ -728,7 +800,7 @@ var SettingsUI = (function () {
                     value: value }).then(function (v) {
           if (v == null) return;
           var n = parseFloat(v);
-          if (isNaN(n)) return;
+          if (!isFinite(n) || n < 0 || (suffix === '%' && n > 100)) { Modal.note({ title: '数值无效', body: '请填有效的非负数；百分比不得超过 100。' }); return; }
           var patch = {};
           patch[key] = suffix === '%' ? n / 100 : n;
           save(patch);
@@ -823,9 +895,7 @@ var SettingsUI = (function () {
    *     要改三项就得进出三轮,而每轮之间还得重新找到这只基金。
    *     录入页早就坚持「一屏滚完不做逐个问答」了,这里却做反了。
    *
-   *  ⚠️ 字段**只剩三个**:代码 · 名字 · 类别。
-   *     日限额、未启用、退役中都砍了 —— 前者不再有约束,
-   *     后两者和「谁是主基金」说的是同一件事,而那件事现在从持仓自动推。
+   *  基金身份与交易限制分别保存：持仓大不代表今天可买。
    */
   /** 改一只基金 —— **弹窗,不是整页**。
    *
@@ -843,18 +913,31 @@ var SettingsUI = (function () {
       return;
     }
     var oldCode = isNew ? null : f.code;
+    var t = Trading.of(f), date = Trading.today();
     Modal.form({
       title: isNew ? '加一只基金' : (f.name || f.code),
+      hint: '按基金公告和购买平台核实；只有核实日期为今天才生成买入。未知不当无限额，0 额度不能买。保存不会改目标比例或历史金额。',
       fields: [
         { key: 'code', label: '基金代码', hint: '六位数字', mode: 'numeric' },
         { key: 'name', label: '名字', hint: '自己认得出就行' },
         { key: 'category', label: '类别', hint: '决定它参与哪一档目标比例',
           type: 'select', options: cats.map(function (c) { return { key: c, label: c }; }) },
+        { key: 'platform', label: '购买平台', hint: '按具体平台及基金适用的日累计额度填写' },
+        { key: 'status', label: '申购状态', type: 'select', options: Object.keys(Trading.LABELS).map(function (k) { return { key: k, label: Trading.LABELS[k] }; }) },
+        { key: 'limit', label: '每日总限额', type: 'number', hint: '仅限额申购时必填，0 表示今天不能买' },
+        { key: 'checked', label: '核实日期', type: 'date', hint: '请实际核对公告与下单页，今天为 ' + date },
+        { key: 'used', label: '今日其他订单已用额度', type: 'number', hint: '只填未在本 App 记录的买入，已记录流水会自动扣除；默认 0' },
       ],
-      values: { code: f.code || '', name: f.name || '', category: f.category || '' },
+      values: { code: f.code || '', name: f.name || '', category: f.category || '', platform: t.platform,
+        status: t.status, limit: t.dailyLimit == null ? (f.dailyLimit == null ? '' : f.dailyLimit) : t.dailyLimit,
+        checked: t.checkedOn, used: t.usedDate === date ? t.usedAmount || 0 : 0 },
       validate: function (v) {
         if (!/^\d{6}$/.test(String(v.code).trim())) return '基金代码是六位数字。';
         if (!v.category) return '还没选类别 —— 不归类的话它不参与再平衡。';
+        if (v.status !== 'unknown' && (!String(v.platform || '').trim() || !Trading.isDate(v.checked))) return '明确申购状态需要购买平台和有效核实日期。';
+        if (v.checked && (!Trading.isDate(v.checked) || v.checked > date)) return '核实日期不能无效或晚于今天。';
+        if (v.status === 'limited' && (String(v.limit).trim() === '' || !isFinite(Number(v.limit)) || Number(v.limit) < 0)) return '限额申购请填写非负的每日总额度。';
+        if (String(v.used).trim() === '' || !isFinite(Number(v.used)) || Number(v.used) < 0) return '今日其他订单已用额度请填非负数，没有填 0。';
         return null;
       },
       // ⚠️ 删除入口跟着一起放进来。原先在整页表单底部,改成弹窗后
@@ -870,7 +953,9 @@ var SettingsUI = (function () {
       if (!v) return;
       var payload = { code: String(v.code).trim(),
                       name: (v.name || '').trim() || String(v.code).trim(),
-                      category: v.category };
+                      category: v.category, trade: { platform: String(v.platform || '').trim(), status: v.status,
+                        checkedOn: v.checked || '', usedDate: date, usedAmount: Number(v.used) } };
+      if (v.status === 'limited') payload.trade.dailyLimit = Number(v.limit);
       if (oldCode && oldCode !== payload.code) payload._oldCode = oldCode;
       var r = Config.upsertFund(payload, !!isNew);
       if (!r.ok) { Modal.note({ title: '存不下来', body: r.why }); return; }

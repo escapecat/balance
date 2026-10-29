@@ -107,7 +107,7 @@ assert(Store.boot().ok);
 eq(Store.getRollback().version, 1);
 eq(Store.getRollback().data, legacy.data, '保留完整升级前回滚点');
 var upgraded = Store.exportAll();
-eq(upgraded.version, 2, '新版同步文件必须阻止旧代码按旧规则读取');
+eq(upgraded.version, Store.SCHEMA, '新版同步文件必须阻止旧代码按旧规则读取');
 upgraded.data.snapshots.forEach(function (s, i) {
   var originalFields = clone(s); delete originalFields.actionIds;
   eq(originalFields, legacy.data.snapshots[i], '不能修改任何原始余额');
@@ -123,7 +123,7 @@ reset(); Store.importAll(legacy);
 eq(Store.exportAll().data, upgraded.data, '旧云端同步/手动导入也必须走迁移');
 reset(); Store.importAll(upgraded);
 eq(Store.exportAll().data, upgraded.data, '新版跨设备往返保留对账边界');
-assert(!Store.inspectImport({ version: 3, data: {} }).ok);
+assert(!Store.inspectImport({ version: Store.SCHEMA + 1, data: {} }).ok);
 assert(!Store.inspectImport({ version: 2, data: legacy.data }).ok, '新版缺边界不能猜');
 assert(Store.rollback().ok);
 assert(Store.rollback().ok);

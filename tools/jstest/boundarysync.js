@@ -38,7 +38,7 @@ assert(Store.boot().ok);
 Sync.saveCfg({ owner: 'fixture', repo: 'private-fixture', token: 'test', dirty: false });
 Sync.autoPull().then(function (r) {
   assert(r.pulled, '成功的 importAll summary 不是失败,自动拉取必须重新渲染');
-  assert.strictEqual(Store.exportAll().version, 2);
+  assert.strictEqual(Store.exportAll().version, Store.SCHEMA);
   assert.strictEqual(Sync.cfg().dirty, false);
   var s = Store.get('snapshots');
   assert.strictEqual(Actions.between(s[1], null).length, 1);
@@ -46,7 +46,7 @@ Sync.autoPull().then(function (r) {
   return Sync.push({});
 }).then(function (r) {
   assert(r.ok);
-  assert.strictEqual(put.version, 2);
+  assert.strictEqual(put.version, Store.SCHEMA);
   assert.deepStrictEqual(put.data.snapshots[1].actionIds, []);
   assert.strictEqual(put.data.flows[0].afterSnapshot, '2020-02-01');
   mem = {}; assert(Store.boot().ok);

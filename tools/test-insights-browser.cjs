@@ -33,6 +33,12 @@ async function putSeed(page, data, version) {
     Store.set('__meta', { schema: version });
   }, { data, version });
   await page.reload();
+  const migration = page.locator('.modal-mask:not(.closing)');
+  if (await migration.count()) {
+    assert.match(await migration.locator('.modal-title').textContent(), /升级|修复/);
+    await migration.getByRole('button', { name: '知道了', exact: true }).click();
+    await page.locator('.modal-mask').waitFor({ state: 'detached' });
+  }
   await page.getByRole('heading', { name: '现在', exact: true }).waitFor();
 }
 async function tab(page, name) { await page.locator('.tabbar button').filter({ hasText: name }).click(); }
@@ -113,7 +119,11 @@ async function main() {
         privatePage.on('pageerror', e => errors.push(e.message));
         await privatePage.goto(url); await privatePage.waitForFunction(() => typeof Store !== 'undefined');
         await putSeed(privatePage, backup.data, backup.version);
-        const original = JSON.stringify(backup.data);
+        const original = await privatePage.evaluate(() => JSON.stringify(Store.exportAll().data));
+        for (const key of ['snapshots', 'flows', 'settings', 'assets', 'prefs']) {
+          assert.ok(await privatePage.evaluate(({ key, expected }) => JSON.stringify(Store.get(key)) === expected,
+            { key, expected: JSON.stringify(backup.data[key]) }), 'Private ledger migration changed ' + key + ' (amounts suppressed)');
+        }
         for (const s of backup.data.snapshots) {
           await privatePage.evaluate(() => HistoryUI.mount(document.querySelector('.page')));
           await privatePage.getByRole('button').filter({ hasText: s.date + ' 盘点' }).click();
@@ -130,7 +140,7 @@ async function main() {
             wealthIdentity: Math.abs(sum.change - sum.inflow - sum.market) < 0.01 };
         });
         assert.ok(Object.values(integrity).every(Boolean), 'Private ledger reconciliation failed (amounts suppressed)');
-        assert.equal(await privatePage.evaluate(() => JSON.stringify(Store.exportAll().data)), original, 'Private balances, flows and settings must stay byte-equivalent');
+        assert.ok(await privatePage.evaluate(expected => JSON.stringify(Store.exportAll().data) === expected, original), 'Private balances, flows and settings must stay byte-equivalent (amounts suppressed)');
         privateResult = { snapshotsChecked: backup.data.snapshots.length, flowsChecked: backup.data.flows.length, integrity, changed: false };
         // Never capture screenshots or write a file containing private values.
       } finally { await privateContext.close(); }
@@ -180,4 +190,5 @@ async function main() {
     if (local) await new Promise(resolve => local.server.close(resolve));
   }
 }
-main().catch(e => { console.error(e); process.exitCode = 1; });
+module.exports = { playwright, localServer, putSeed, tab };
+if (require.main === module) main().catch(e => { console.error(e); process.exitCode = 1; });

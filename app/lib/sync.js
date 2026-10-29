@@ -39,6 +39,17 @@ var Sync = (function () {
   }
 
   function path() { return cfg().path || 'data.json'; }
+  function content(payload) { return { version: payload.version, data: payload.data }; }
+  function sameTarget(c) {
+    var now = cfg();
+    return c.owner === now.owner && c.repo === now.repo && c.token === now.token && (c.path || 'data.json') === (now.path || 'data.json');
+  }
+  function acknowledge(payload, sha, c, extra) {
+    if (!sameTarget(c)) return false;
+    var clean = Store.same(content(Store.exportAll()), content(payload));
+    saveCfg(Object.assign({}, extra || {}, { sha: sha, dirty: !clean }));
+    return clean;
+  }
 
   // ---------------- base64(UTF-8 安全) ----------------
   //
@@ -165,7 +176,17 @@ var Sync = (function () {
     //    而它一旦过期,写入永远 409,同步从此静静地失败。
     return req('GET', '/repos/' + c.owner + '/' + c.repo + '/contents/' +
                       encodeURIComponent(path())).then(function (g) {
+      if (!sameTarget(c)) return { ok: false, why: '同步配置已变化，请重新操作' };
+      if (!g.ok && g.status !== 404) return { ok: false, why: explain(g) };
       var remoteSha = g.ok && g.body ? g.body.sha : null;
+      if (g.ok) {
+        var remote;
+        try { remote = JSON.parse(fromB64(g.body.content)); }
+        catch (e) { return { ok: false, why: '云端内容无法核对，请先导出本机备份' }; }
+        if (Store.same(content(remote), content(payload))) {
+          return { ok: true, skipped: true, sha: remoteSha, clean: acknowledge(remote, remoteSha, c) };
+        }
+      }
 
       // 云端有东西,而且**不是我们上次推的那份** → 别人改过
       if (remoteSha && c.sha && remoteSha !== c.sha && !(opts || {}).force) {
@@ -185,8 +206,8 @@ var Sync = (function () {
           return { ok: false, conflict: true, why: '另一台设备刚好也在存' };
         }
         if (!r.ok) return { ok: false, why: explain(r) };
-        saveCfg({ sha: r.body.content.sha, lastPush: new Date().toISOString() });
-        return { ok: true, sha: r.body.content.sha };
+        var sha = r.body.content.sha;
+        return { ok: true, sha: sha, clean: acknowledge(payload, sha, c, { lastPush: new Date().toISOString() }) };
       });
     });
   }
@@ -263,6 +284,7 @@ var Sync = (function () {
     if (c.lastPush) {
       return { state: 'ok', text: '上次同步 ' + c.lastPush.slice(0, 16).replace('T', ' ') };
     }
+    if (c.sha) return { state: 'ok', text: '已与云端核对一致' };
     return { state: 'idle', text: '还没推过' };
   }
 
@@ -272,22 +294,29 @@ var Sync = (function () {
    *  那意味着本机的每一笔都已经在云端了,所以云端只可能比本机新或一样新,
    *  拉下来不会丢东西。
    *
-   *  ⚠️ **dirty 时绝不拉。** 那时候两边都有对方没有的东西,
-   *     谁覆盖谁是个需要你看着数字决定的问题 —— 自动选一个就是赌,
-   *     而赌输的表现是「我明明录过那一期」。这种情况留给「立刻同步」去问。
-   *
-   *  ⚠️ sha 相同就什么都不做,连解析都省了 —— 每次开 app 都整份导入一遍的话,
-   *     Store 会被写一遍,又触发 markDirty,又推一次,循环起来了。
+   *  dirty 时允许只读核对：内容完全相同才能清掉旧误报；真实差异绝不覆盖。
+   *  核对和导入之间再次检查本机，避免请求期间的新改动被远端盖掉。
+   *  比较 version/data，不比较每次导出都会变化的 exportedAt；相同内容不重复导入。
    *
    *  @return {pulled:true} 拉了 | {same:true} 云端没变 | {skipped:true} 有本地改动
    */
   function autoPull() {
     if (!ready()) return Promise.resolve({ skipped: true, why: '没开同步' });
-    if (cfg().dirty) return Promise.resolve({ skipped: true, why: '本机还有没推上去的改动' });
+    var initial = Store.exportAll(), c = cfg(), wasDirty = !!c.dirty;
     return pull().then(function (r) {
       if (r.empty) return { same: true, why: '云端还没有数据' };
       if (!r.ok) return { skipped: true, why: r.why };
-      if (r.sha && r.sha === cfg().sha) return { same: true };
+      if (!sameTarget(c)) return { skipped: true, why: '同步配置已变化' };
+      if (Store.same(content(Store.exportAll()), content(r.data))) {
+        acknowledge(r.data, r.sha, c);
+        return { same: true, reconciled: wasDirty };
+      }
+      // 脏标记可能是旧版同值写入误报；只读比对可以清除误报，绝不据此覆盖真实本机改动。
+      if (wasDirty || cfg().dirty || !Store.same(content(initial), content(Store.exportAll())))
+        return { skipped: true, why: '本机还有没推上去的改动' };
+      if (r.sha && r.sha === c.sha) {
+        markDirty(); return { skipped: true, why: '本机内容与上次云端版本不同，请核对后同步' };
+      }
 
       var mine = Store.inspectImport(Store.exportAll());
       // ⚠️ 云端比本机**旧**的时候也别拉 —— 那说明本机的推送记录丢了
@@ -299,7 +328,7 @@ var Sync = (function () {
       Store.saveRollback('开机从云端拉取之前');
       try { silently(function () { Store.importAll(r.data); }); }
       catch (e) { return { skipped: true, why: e.message }; }
-      saveCfg({ sha: r.sha, dirty: false });
+      acknowledge(r.data, r.sha, c); // 导入若包含数据升级，升级后的真实差异仍待同步。
       return { pulled: true, summary: r.summary };
     });
   }
@@ -315,7 +344,6 @@ var Sync = (function () {
    *
    *    dirty 标记留着:主界面和设置页靠它显示「有改动还没推上去」。
    */
-  var timer = null;
   var quiet = false;      // 正在往本地灌云端数据 —— 这期间的写入不算「你改的」
 
   /** 期间的所有写入都不打脏标记。
@@ -325,8 +353,9 @@ var Sync = (function () {
    *     一次开机就多一个毫无内容的 commit,而且每台设备开机都来一遍。
    */
   function silently(fn) {
+    var previous = quiet;
     quiet = true;
-    try { return fn(); } finally { quiet = false; }
+    try { return fn(); } finally { quiet = previous; }
   }
 
   function markDirty() {
@@ -334,20 +363,18 @@ var Sync = (function () {
     saveCfg({ dirty: true });
   }
   function clearDirty() { saveCfg({ dirty: false }); }
+  function acknowledgePull(payload, sha) { return acknowledge(payload, sha, cfg()); }
 
   /** 手动推(设置页那个按钮走这条)。 */
   function flush() {
     if (!ready() || !cfg().dirty) return Promise.resolve({ ok: true, skipped: true });
-    return push({}).then(function (r) {
-      if (r.ok) clearDirty();
-      return r;
-    });
+    return push({});
   }
 
   return { cfg: cfg, saveCfg: saveCfg, ready: ready, check: check,
            pull: pull, push: push, history: history, at: at,
            status: status, markDirty: markDirty, clearDirty: clearDirty, flush: flush,
-           autoPull: autoPull, silently: silently,
+           autoPull: autoPull, silently: silently, acknowledgePull: acknowledgePull,
            toB64: toB64, fromB64: fromB64 };
 })();
 

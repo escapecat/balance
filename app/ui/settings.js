@@ -484,8 +484,7 @@ var SettingsUI = (function () {
     Sync.push({}).then(function (r) {
       Modal.close();
       if (r.ok) {
-        Sync.clearDirty();
-        Modal.note({ title: '推上去了', body: '云端多了一个版本,随时能翻回来。' });
+        pushResult(r);
         render();
         return;
       }
@@ -505,7 +504,7 @@ var SettingsUI = (function () {
               hint: '云端那边的改动会没有,而且找不回来' },
           ],
         }).then(function (v) {
-          if (v === 'pull' && g.ok) return doPull(g.data);
+          if (v === 'pull' && g.ok) return doPull(g.data, g.sha);
           if (v === 'force') return doPush(true);
         });
       });
@@ -526,7 +525,7 @@ var SettingsUI = (function () {
 
       var mine = Store.inspectImport(Store.exportAll());
       // 本机空着 → 直接拉,没什么好问的
-      if (!mine.summary.snapshots) return doPull(r.data);
+      if (!mine.summary.snapshots) return doPull(r.data, r.sha);
 
       Modal.confirm({
         title: '用云端那份盖掉本机?',
@@ -537,7 +536,7 @@ var SettingsUI = (function () {
                  : '') +
               ' 会先存一个回滚点。',
         ok: '取下来', danger: mine.summary.last > r.summary.last,
-      }).then(function (yes) { if (yes) doPull(r.data); });
+      }).then(function (yes) { if (yes) doPull(r.data, r.sha); });
     });
   }
 
@@ -547,25 +546,28 @@ var SettingsUI = (function () {
         Modal.note({ title: r.conflict ? '有冲突' : '推不上去', body: r.why });
         return;
       }
-      Sync.clearDirty();
-      Modal.note({ title: '推上去了', body: '这一版在 GitHub 上留了一个 commit。' });
+      pushResult(r);
       render();
     });
   }
 
-  function doPull(data) {
+  function pushResult(r) {
+    Modal.note({ title: r.skipped ? '已是最新' : '推上去了', body: (r.skipped ? '本机与云端内容相同，没有重复创建版本。' : '本次数据已上传并保留版本。') +
+      (r.clean === false ? '同步期间另有本机改动，仍保留未同步提示，不会漏掉它们。' : '') });
+  }
+  function doPull(data, sha) {
     // ⚠️ 覆盖本机之前**先存回滚点**。这是唯一一个会一次性
     //    抹掉全部本地数据的操作,没有后路是不行的。
     Store.saveRollback('从云端拉取之前');
     // importAll 成功时直接返回 summary,失败时抛异常。
     // 把 summary 当成 {ok:true} 会导致一个很骗人的状态:
     // 数据其实已经写入,界面却每次都说「导入失败」。
-    try { Store.importAll(data); }
+    try { Sync.silently(function () { Store.importAll(data); }); }
     catch (e) {
       Modal.note({ title: '导入失败', body: e.message || String(e) });
       return;
     }
-    Sync.clearDirty();
+    if (sha) Sync.acknowledgePull(data, sha); else Sync.markDirty(); // 恢复历史版不是已与当前云端一致。
     if (onChanged) onChanged();
     Modal.note({ title: '拉下来了', body: '本机已经换成云端那份。后悔了去「退回」。' });
     render();
@@ -907,6 +909,12 @@ var SettingsUI = (function () {
           if (mode !== 'main') { mode = 'main'; error = ''; draw(); return; }
           error = opts.validate(values) || '';
           if (error) { draw(); return; }
+          var unchanged = !isNew && opts.fields.every(function (field) {
+            if (field.key === 'limit' && values.status !== 'limited') return true;
+            if (field.type === 'number') return Number(values[field.key]) === Number(opts.values[field.key]);
+            return String(values[field.key] == null ? '' : values[field.key]).trim() === String(opts.values[field.key] == null ? '' : opts.values[field.key]).trim();
+          });
+          if (unchanged) { finish(null); return; }
           finish(values);
         } }, [mode === 'main' ? '保存' : '完成']));
         if (mode === 'main' && opts.extra) w.appendChild(h('button', { class: 'link danger', onclick: function () { opts.extra.onClick(finish); } }, [opts.extra.label]));

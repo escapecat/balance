@@ -115,9 +115,26 @@ var Store = (function () {
   //    拉数据时会把那台机器的后路一起覆盖掉。
   var SYNCED = { settings: 1, snapshots: 1, assets: 1, todos: 1, flows: 1, prefs: 1 };
 
+  function comparable(value) {
+    function ordered(v) {
+      if (!v || typeof v !== 'object') return v;
+      if (Array.isArray(v)) return v.map(ordered);
+      var out = Object.create(null); Object.keys(v).sort().forEach(function (k) { out[k] = ordered(v[k]); }); return out;
+    }
+    var json = JSON.stringify(value);
+    return json === undefined ? undefined : JSON.stringify(ordered(JSON.parse(json)));
+  }
+  function same(a, b) { return comparable(a) === comparable(b); }
+
   function set(key, value) {
     try {
-      localStorage.setItem(NS + key, JSON.stringify(value));
+      var next = JSON.stringify(value), previous = localStorage.getItem(NS + key);
+      if (next === undefined) return false;
+      if (previous === next) return true;
+      if (previous !== null) {
+        try { if (same(JSON.parse(previous), value)) return true; } catch (e) { /* 坏旧值允许用有效值修复。 */ }
+      }
+      localStorage.setItem(NS + key, next);
       // ⚠️ 脏标记打在**这一处**,不散到各个 core 模块里。
       //    写入点有六七个(commit / append / remove / complete / save …),
       //    逐个加钩子必然漏一个 —— 而漏掉的表现是「这类改动从来不同步」,
@@ -134,7 +151,12 @@ var Store = (function () {
   }
 
   function remove(key) {
-    try { localStorage.removeItem(NS + key); } catch (e) {}
+    try {
+      if (localStorage.getItem(NS + key) === null) return true;
+      localStorage.removeItem(NS + key);
+      if (SYNCED[key] && typeof Sync !== 'undefined') Sync.markDirty();
+      return true;
+    } catch (e) { return false; }
   }
 
   function keys() {
@@ -335,7 +357,7 @@ var Store = (function () {
     return { ok: true, summary: chk.summary };
   }
 
-  return { NS: NS, KEYS: KEYS, SCHEMA: SCHEMA, get: get, set: set, remove: remove, keys: keys,
+  return { NS: NS, KEYS: KEYS, SCHEMA: SCHEMA, get: get, set: set, remove: remove, keys: keys, same: same,
            exportAll: exportAll, inspectImport: inspectImport, importAll: importAll,
            clearAll: clearAll, boot: boot, replaceData: replaceData, firstSnapshotDate: firstSnapshotDate,
            saveRollback: saveRollback, getRollback: getRollback, rollback: rollback };

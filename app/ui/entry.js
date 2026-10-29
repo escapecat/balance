@@ -32,7 +32,7 @@ var EntryUI = (function () {
     return n;
   }
 
-  function settings() { return Store.get('settings', {}) || {}; }
+  function settings() { return Config.get(); }
   function snapshots() { return Store.get('snapshots', []) || []; }
   function money(n) {
     if (n == null || isNaN(n)) return '—';
@@ -246,7 +246,7 @@ var EntryUI = (function () {
       //    工资是体现在**现金余额**上的,不照实抄就没有。
       var dCash = Portfolio.sum(built.snapshot.cash) - Portfolio.sum(prev.cash || {});
       box2.appendChild(h('div', { class: 'between' }, [
-        h('span', { class: 'xs dim' }, ['工资 − 花费']),
+        h('span', { class: 'xs dim' }, ['外部净流入（推算）']),
         h('span', {}, [signed(d.inflow)]),
       ]));
       box2.appendChild(h('div', { class: 'xs dim', style: 'text-align:right;margin-top:-2px' }, [

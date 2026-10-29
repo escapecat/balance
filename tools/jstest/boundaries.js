@@ -48,7 +48,9 @@ eq([delta.market, delta.inflow, delta.netBuy], [3000, 5000, 20000]);
 eq(Ledger.perFund(ss[2], ss[1])[0].market, 3000);
 eq(Actions.between(ss[2], null).length, 0);
 var contribution = Stats.contribution(ss, Actions.all(), { funds: [{ code: 'A', category: 'stock' }] });
-eq(contribution.rows[0].market, 3000, '分类收益与逐只/总收益共用同一边界');
+eq(contribution.rows[0].market, 4000, '完整记录区间包含第一段的一千及第二段的三千');
+eq(Stats.contribution(ss.slice(1), Actions.all(), { funds: [{ code: 'A', category: 'stock' }] }).rows[0].market, 3000,
+   '显式选择本期时，分类收益与逐只/总收益共用同一边界');
 assert(Stats.twr(ss).ok && Stats.xirr(ss).ok);
 
 // 同一个稳定 todo 在下一期再完成,不能删掉上一期买入;撤销也只影响本轮。
@@ -56,7 +58,7 @@ plan('2020-03-01');
 assert(Todos.complete('buy:A', 10000, '2020-03-01').ok);
 eq(Actions.all().length, 2);
 eq(Ledger.delta(ss[2], ss[1]), delta);
-eq(Stats.contribution(ss, Actions.all(), { funds: [{ code: 'A', category: 'stock' }] }).rows[0].market, 3000,
+eq(Stats.contribution(ss, Actions.all(), { funds: [{ code: 'A', category: 'stock' }] }).rows[0].market, 4000,
    '尚未对账的买入不能漏进分类收益');
 assert(Todos.undo('buy:A').ok);
 eq(Actions.all().length, 1, '不能撤销上一轮真实买入');

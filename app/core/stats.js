@@ -61,13 +61,8 @@ var Stats = (function () {
                : '已经连着 ' + have + ' 期分得开了,还差 ' + (MIN_PERIODS - have) + ' 期' };
   }
 
-  /** 时间加权收益率 —— 每个区间算一次,连乘。
-   *
-   *  ⚠️ 净投入要从**期末**扣掉再和期初比。放在期初(当作期初就有这笔钱)
-   *     会把收益率压低,而且压低的幅度跟你投得多不多成正比 ——
-   *     越努力定投,数字越难看,那显然是错的。
-   *     真实情况在两者之间(钱是月中某天进的),月度数据分不了那么细,
-   *     取期末口径是保守的那一侧。 */
+  /** 盘点期近似收益率：假设净流入在期末。缺少流入时点估值，
+   *  不是精确 TWR，也不能宣称比其他时点假设更保守。 */
   function twr(snaps) {
     var g = gate(snaps);
     if (!g.ok) return g;
@@ -125,11 +120,19 @@ var Stats = (function () {
       if (Math.abs(next - r) < 1e-9) { r = next; break; }
       r = next;
     }
-    // ⚠️ 没收敛就**说没收敛**,不把最后一次迭代的值当答案。
-    if (!isFinite(r) || Math.abs(r) > 100) {
+    // 除了范围还必须验现金流残差；有限数不等于一个有效的根。
+    var residual = 0, scale = 0;
+    cf.forEach(function (c) {
+      residual += c.amount / Math.pow(1 + r, dayDiff(t0, c.date) / 365);
+      scale += Math.abs(c.amount);
+    });
+    if (!isFinite(r) || r <= -1 || Math.abs(r) > 100 ||
+        !isFinite(residual) || Math.abs(residual) > Math.max(0.005, scale * 1e-8)) {
       return { ok: false, have: g.have, need: MIN_PERIODS, why: '没算收敛' };
     }
-    return { ok: true, rate: r, days: dayDiff(t0, cf[cf.length - 1].date) };
+    var days = dayDiff(t0, cf[cf.length - 1].date);
+    if (!days) return { ok: false, why: '区间没有时间跨度' };
+    return { ok: true, rate: r, days: days, annualized: true, approximate: true };
   }
 
   /** 每一期各类占多少 —— 走势图和结构图用。
@@ -146,58 +149,87 @@ var Stats = (function () {
   function composition(snaps, settings) {
     var cats = Object.keys((settings || {}).targets || {});
     return (snaps || []).map(function (s) {
-      var sm = Portfolio.summarize(s, settings);
-      var by = {};
-      sm.rows.forEach(function (r) {
-        var key = r.isCash ? '现金' : (r.unknown ? '未分类' : r.category);
-        by[key] = (by[key] || 0) + r.value;
-      });
+      var by = Portfolio.byCategory(s.holdings, Portfolio.knownFunds(settings));
+      by['现金'] = Portfolio.sum(s.cash);
       var ext = Portfolio.sum(s.external || {});
       if (ext > 0) by['组合外'] = ext;
       var t = total(s) + ext;
       return { date: s.date, total: t, portfolio: total(s), external: ext, by: by,
-               pct: cats.concat(['现金', '未分类', '组合外']).reduce(function (m, c) {
+               pct: Object.keys(by).reduce(function (m, c) {
                  if (by[c] != null) m[c] = t ? by[c] / t : 0;
                  return m;
                }, {}) };
     });
   }
 
-  /** 每一类:投进去多少(来自申报的现金流)· 涨跌多少(总变化 − 投入)。
-   *
-   *  ⚠️ 只有**勾选申报过**的期间才算得出来。没有分类流水的那几期,
-   *     `market` 是 null —— 界面上写「未知」,不许拿总额倒推。 */
+  /** 只有明确声明买卖完整的区间才核算；没有买卖不等于没有记录。
+   *  持仓与流水采用相同代码归类，现金分红与净买入分开。 */
   function contribution(snaps, flows, settings) {
     if (!snaps || snaps.length < 2) return { ok: false, why: '至少要两期' };
-    var records = (flows || []).filter(function (f) { return Actions.MONEY[f.kind]; });
-    if (!records.length) return { ok: false, why: '还没有勾过任何一条待办 —— 分类流水从第一次勾选开始' };
-
-    // 起点取「第一条流水之前的最后一期」,再早的没有流水可对照
-    var start = null;
-    snaps.forEach(function (s) {
-      if (!records.some(function (f) { return Actions.included(f, s); })) start = s;
-    });
-    if (!start) start = snaps[0];
+    if (typeof Actions === 'undefined') return { ok: false, why: '没有完整买卖记录，分类盈亏未知' };
+    // 与总账共用显式声明的起点；没有交易也可能是完整的零买卖期间。
+    var available = snaps.filter(function (s) { return Actions.covered(s.date); });
+    var start = available[0];
     var end = snaps[snaps.length - 1];
-    if (start.date === end.date) return { ok: false, why: '第一次勾选之后还没录过新的一期' };
+    if (!start || start.date >= end.date) return { ok: false, why: '完整记账起点之后还没有两次盘点，分类盈亏未知' };
 
-    var funds = (settings || {}).funds || [];
+    var funds = Portfolio.knownFunds(settings);
+    var categoryOf = {};
+    funds.forEach(function (f) { categoryOf[f.code] = f.category || '未分类'; });
     var a = Portfolio.byCategory(start.holdings, funds);
     var b = Portfolio.byCategory(end.holdings, funds);
-    var inflow = {};
+    var inflow = {}, dividends = {};
     Actions.between(start, end, flows || []).forEach(function (f) {
       if (!Actions.MONEY[f.kind]) return;
-      inflow[f.category] = (inflow[f.category] || 0) + (f.kind === 'buy' ? 1 : -1) * f.amount;
+      // 持仓与流水按同一套代码归类；改基金类别不能凭空制造两笔反向盈亏。
+      var c = f.code ? (categoryOf[f.code] || '未分类') : (f.category || '未分类');
+      if (f.kind === 'dividend') dividends[c] = (dividends[c] || 0) + f.amount;
+      else inflow[c] = (inflow[c] || 0) + (f.kind === 'buy' ? 1 : -1) * f.amount;
     });
 
     var rows = [];
-    Object.keys(b).concat(Object.keys(a)).forEach(function (c) {
+    Object.keys(b).concat(Object.keys(a), Object.keys(inflow), Object.keys(dividends)).forEach(function (c) {
       if (rows.some(function (r) { return r.category === c; })) return;
       var got = (inflow[c] || 0);
       rows.push({ category: c, from: a[c] || 0, to: b[c] || 0,
-                  inflow: got, market: (b[c] || 0) - (a[c] || 0) - got });
+                  inflow: got, dividend: dividends[c] || 0,
+                  market: (b[c] || 0) - (a[c] || 0) - got + (dividends[c] || 0) });
     });
     return { ok: true, from: start.date, to: end.date, rows: rows };
+  }
+
+  // 所有区间界面共享这一处选择规则，不暗中替收益率接上较早的不完整区间。
+  function select(snaps, period, year) {
+    var list = (snaps || []).slice().sort(function (a, b) { return a.date.localeCompare(b.date); });
+    if (!list.length) return { snapshots: [], requested: null };
+    var end = list[list.length - 1], requested = null;
+    if (period === 'latest') list = list.slice(-2);
+    else if (period === 'three') list = list.slice(-4);
+    else if (period === 'year') {
+      requested = (year || end.date.slice(0, 4)) + '-01-01';
+      list = list.filter(function (s) { return s.date >= requested; });
+    }
+    if (!list.length) return { snapshots: [], covered: [], requested: requested, limited: true };
+    var have = usable(list);
+    var covered = have ? list.slice(-have) : [];
+    return { snapshots: list, covered: covered, requested: requested,
+             from: list[0].date, to: end.date, limited: covered.length < list.length ||
+               !!(requested && (!covered.length || covered[0].date > requested)) };
+  }
+
+  function summary(snaps) {
+    if (!snaps || snaps.length < 2) return { ok: false, why: '至少需要两次盘点' };
+    var inflow = 0, market = 0, netBuy = 0, dividend = 0;
+    for (var i = 1; i < snaps.length; i++) {
+      var d = Ledger.delta(snaps[i], snaps[i - 1]);
+      if (d.market == null) return { ok: false, why: '所选区间买卖记录不完整，盈亏未知' };
+      inflow += d.inflow; market += d.market; netBuy += d.netBuy || 0; dividend += d.dividend || 0;
+    }
+    var first = snaps[0], last = snaps[snaps.length - 1];
+    return { ok: true, from: first.date, to: last.date, inflow: inflow, market: market,
+             netBuy: netBuy, dividend: dividend, change: total(last) - total(first),
+             external: Portfolio.sum(last.external) - Portfolio.sum(first.external),
+             periods: snaps.length - 1 };
   }
 
   // ---- 小工具 ----
@@ -214,7 +246,7 @@ var Stats = (function () {
 
   return { MIN_PERIODS: MIN_PERIODS, usable: usable, gate: gate, inflowOf: inflowOf,
            twr: twr, xirr: xirr, composition: composition,
-           contribution: contribution, annualize: annualize };
+           contribution: contribution, annualize: annualize, select: select, summary: summary };
 })();
 
 if (typeof module !== 'undefined') module.exports = Stats;

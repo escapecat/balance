@@ -21,7 +21,15 @@ var Config = (function () {
     Object.keys(DEFAULTS).forEach(function (k) {
       if (s[k] === undefined) s[k] = DEFAULTS[k];
     });
+    s.funds = validFunds(s.funds);
+    s.retired = validFunds(s.retired);
     return s;
+  }
+
+  function validFunds(list) {
+    return (Array.isArray(list) ? list : []).filter(function (f) {
+      return f && typeof f === 'object' && typeof f.code === 'string' && f.code.trim();
+    });
   }
 
   function save(patch) {
@@ -35,7 +43,7 @@ var Config = (function () {
   function upsertFund(f, isNew) {
     var s = get();
     var list = (s.funds || []).slice();
-    if (!f.code) return { ok: false, why: '没有基金代码' };
+    if (!f || typeof f.code !== 'string' || !f.code.trim()) return { ok: false, why: '没有基金代码' };
 
     var i = list.findIndex(function (x) { return x.code === f.code; });
     if (isNew && i >= 0) return { ok: false, why: '代码 ' + f.code + ' 已经在清单里了' };
@@ -82,8 +90,7 @@ var Config = (function () {
   /** 清单 + 退役的,合起来给「历史怎么归类」用。
    *  ⚠️ 现役的排在后面 —— 同代码时它覆盖退役的那份定义。 */
   function allKnown(s) {
-    s = s || get();
-    return (s.retired || []).concat(s.funds || []);
+    return Portfolio.knownFunds(s || get());
   }
 
   function addCategory(name, ratio) {

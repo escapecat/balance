@@ -69,13 +69,41 @@ var Dom = (function () {
     try {
       if (typeof window !== 'undefined' && window.scrollTo) window.scrollTo(0, 0);
       if (typeof document !== 'undefined') {
+        var page = document.querySelector && document.querySelector('.page');
+        if (page) page.scrollTop = 0;
         if (document.documentElement) document.documentElement.scrollTop = 0;
         if (document.body) document.body.scrollTop = 0;
       }
     } catch (e) {}
   }
 
-  return { text: text, label: label, LABEL: LABEL, toTop: toTop };
+  function h(tag, attrs, kids) {
+    var node = document.createElement(tag);
+    Object.keys(attrs || {}).forEach(function (k) {
+      if (k === 'class') node.className = attrs[k];
+      else if (k.indexOf('on') === 0) node.addEventListener(k.slice(2), attrs[k]);
+      else if (attrs[k] != null) node.setAttribute(k, attrs[k]);
+    });
+    (kids || []).forEach(function (c) { if (c != null) node.appendChild(typeof c === 'string' ? text(c) : c); });
+    return node;
+  }
+  function money(n) {
+    if (n == null || !isFinite(n)) return '—';
+    return (n < 0 ? '−' : '') + String(Math.round(Math.abs(n))).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  }
+  function signed(n) { return n == null ? '—' : (n > 0 ? '+' : '') + money(n); }
+  function hero(total, external, title) {
+    var box = h('div', { class: 'hero' }, [h('div', { class: 'hero-cap' }, [title || '总资产']),
+      h('div', { class: 'hero-num amount' }, ['¥' + money(total + external)])]);
+    var split = h('div', { class: 'hero-split' });
+    [['投资组合', total], ['组合外估值', external]].forEach(function (r) {
+      if (r[0] === '组合外估值' && !external) return;
+      split.appendChild(h('div', {}, [h('span', { class: 'k' }, [r[0]]), h('span', { class: 'v amount' }, ['¥' + money(r[1])])]));
+    });
+    box.appendChild(split);
+    return box;
+  }
+  return { text: text, label: label, LABEL: LABEL, toTop: toTop, h: h, money: money, signed: signed, hero: hero };
 })();
 
 if (typeof module !== 'undefined') module.exports = Dom;

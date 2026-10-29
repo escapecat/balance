@@ -126,14 +126,18 @@ near(comp[1].pct['股'], 0.75, 1e-9, '股的占比算错');
 
 // ---- 8. 各类贡献:没有分类流水就不给 ----
 // 分类贡献与主账本共享 Actions 的盘点边界;上面的手填收益夹具仍不加载它。
-global.Store = { get: function (k, fallback) { return fallback; } };
+var actionMem = {};
+global.Store = { get: function (k, fallback) { return actionMem[k] === undefined ? fallback : actionMem[k]; },
+  set: function (k, value) { actionMem[k] = value; } };
 global.Actions = require(path.join(A, 'core', 'actions.js'));
 var noFlow = Stats.contribution(
   [{ date: '2026-01-01', holdings: { S1: 100000 }, cash: {} },
    { date: '2026-02-01', holdings: { S1: 150000 }, cash: {} }], [], S);
 ok(!noFlow.ok, '★ 没有分类流水却把总变化当成了涨跌');
 
-// 有流水:投了 3 万,总共涨了 5 万 → 市场贡献 2 万
+// 有流水仍须明确声明记录完整，不能从第一笔买入自动推断。
+Actions.startFrom('2026-01-01');
+// 投了 3 万,总共涨了 5 万 → 市场贡献 2 万
 var withFlow = Stats.contribution(
   [{ date: '2026-01-01', holdings: { S1: 100000 }, cash: {} },
    { date: '2026-02-01', holdings: { S1: 150000 }, cash: {} }],

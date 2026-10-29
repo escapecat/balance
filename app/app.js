@@ -100,6 +100,10 @@
     //    的容器。少这个 class，内容区就不再滚，整页也不滚（html 是
     //    overflow:hidden），表现是长页面根本翻不下去。
     var page = h('div', { class: 'page' });
+    if (!entering) root.appendChild(h('div', { class: 'app-top' }, [
+      h('div', { class: 'brand' }, [h('span', { class: 'brand-mark', 'aria-hidden': 'true' }, ['≡']), 'Balance']),
+      h('span', { class: 'hint' }, ['记录资产，分清投入与盈亏']),
+    ]));
 
     // 录入是全屏接管 —— 抄数字的时候底下不该还挂着 tab 栏勾着你的注意力
     if (entering) {

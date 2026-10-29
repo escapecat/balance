@@ -139,6 +139,22 @@ var Store = (function () {
       }
     }
     var snaps = obj.data.snapshots || [];
+    var settings = obj.data.settings;
+    var emptyFunds = 0;
+    if (settings !== undefined) {
+      if (!settings || typeof settings !== 'object' || Array.isArray(settings)) return { ok: false, why: 'settings 应为配置对象' };
+      for (var j = 0; j < 2; j++) {
+        var field = ['funds', 'retired'][j], list = settings[field];
+        if (list === undefined) continue;
+        if (!Array.isArray(list)) return { ok: false, why: field + ' 应该是基金数组' };
+        for (var f = 0; f < list.length; f++) {
+          if (list[f] === null) { emptyFunds++; continue; } // 兼容旧备份，读取时忽略，不改账。
+          if (!list[f] || typeof list[f].code !== 'string' || !list[f].code.trim()) {
+            return { ok: false, why: field + ' 中有缺少有效代码的基金，请先检查备份' };
+          }
+        }
+      }
+    }
     if (obj.version >= 2 && snaps.some(function (s) {
       return !s || !Array.isArray(s.actionIds) || s.actionIds.some(function (id) { return typeof id !== 'string'; });
     })) return { ok: false, why: '缺少同日交易的对账边界,不能安全导入' };
@@ -152,6 +168,7 @@ var Store = (function () {
         todos: (obj.data.todos || []).length,
         flows: (obj.data.flows || []).length,
         exportedAt: obj.exportedAt || null,
+        emptyFundEntries: emptyFunds,
       },
     };
   }

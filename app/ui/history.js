@@ -47,165 +47,115 @@ var HistoryUI = (function () {
   }
 
   var viewing = null;    // 正在看哪一期的详情
-  var SHOW = 8;          // 列表默认显示几条
-  var expanded = {};     // 哪几段被展开了
-
-  /** 长列表折叠 —— **记录只会越来越多。**
-   *  一年 12 期、三年 36 期、动作上百条,全铺出来就没法翻了。
-   *  ⚠️ 折叠了要**说出来还有多少条**,并且一点就能展开 ——
-   *     悄悄少显示几条,你会以为那几个月不存在。 */
-  function collapsible(key, rows, w) {
-    if (rows.length <= SHOW || expanded[key]) {
-      rows.forEach(function (r) { w.appendChild(r); });
-      if (rows.length > SHOW) {
-        w.appendChild(h('button', {
-          class: 'link', onclick: function () { expanded[key] = false; render(); },
-        }, ['收起']));
-      }
-      return;
-    }
-    rows.slice(0, SHOW).forEach(function (r) { w.appendChild(r); });
-    w.appendChild(h('button', {
-      class: 'link', onclick: function () { expanded[key] = true; render(); },
-    }, ['还有 ' + (rows.length - SHOW) + ' 条,全部展开']));
-  }
-
   var lastView = null;   // 换了一屏才回顶部，重渲染不动
 
-  function render() {
-    el.innerHTML = '';
-    // 换了一屏就回到顶部。⚠️ 只在**视图真的变了**时做 ——
-    // 每次 render 都做的话，勾一条待办都会把你弹回顶部。
-    var vNow = String(viewing ? viewing.snap.date : '');
-    if (vNow !== lastView) { lastView = vNow; Dom.toTop(); }
-    // 看某一期的详情时**整屏接管** —— 和录入页、基金表单同一个模式
-    if (viewing) { el.appendChild(snapshotView()); return; }
-    var w = h('div', { class: 'wrap' });
-    var snaps = (Store.get('snapshots', []) || []).slice();
-    var todos = Todos.all();
-    var flows = Todos.flows();
-
-    w.appendChild(h('h1', {}, ['历史']));
-
-    if (!snaps.length) {
-      w.className = 'wrap wrap-fill';   // 空状态：把 tab 栏以上占满，内容居中
-      w.appendChild(h('div', { class: 'empty' }, [
-        h('div', { class: 'big' }, ['≡']),
-        h('div', {}, ['还没有记录 —— 录一期就有了']),
-      ]));
-      el.appendChild(w);
-      return;
-    }
-
-    // ---- 做过什么 ----
-    //
-    // 倒序 —— 最近的在最上面。翻历史的时候没人从头开始看。
-    w.appendChild(h('h2', {}, ['做过什么']));
-    var acted = flows.slice().reverse();
-    if (!acted.length) {
-      w.appendChild(h('div', { class: 'note' }, [
-        '还没有勾过任何一条待办。在「现在」页点一下清单里的项目,' +
-        '填上实际买了多少 —— **那是收益率的唯一来源**。',
-      ]));
-    } else {
-      var fl = h('div', { class: 'list' });
-      var actRows = [];
-      acted.forEach(function (f) {
-        var t = todos.filter(function (x) { return x.id === f.todoId; })[0];
-        var bits = [md(f.date)];
-        if (t && t.status === 'partial') bits.push('计划 ¥' + money(t.target) + ',只做了一部分');
-        else if (t) bits.push('计划 ¥' + money(t.target));
-        actRows.push(h('div', { class: 'list-row' }, [
-          h('div', { class: 'body' }, [
-            h('div', { class: 'ttl' }, [(f.kind === 'sell' ? '卖 ' : '买 ') + f.category]),
-            h('div', { class: 'sub2' }, [bits.join(' · ')]),
-          ]),
-          h('div', { class: 'amt' }, [
-            h('span', { class: 'u' }, [f.kind === 'sell' ? '−¥' : '¥']), money(f.amount),
-          ]),
-        ]));
-      });
-      collapsible('acted', actRows, fl);
-      w.appendChild(fl);
-    }
-
-    // ---- 说了没做的 ----
-    var dropped = todos.filter(function (t) { return t.status === 'dropped'; });
-    if (dropped.length) {
-      w.appendChild(h('h2', {}, ['决定不做的']));
-      var dl = h('div', { class: 'list' });
-      dropped.forEach(function (t) {
-        dl.appendChild(h('div', {
-          class: 'list-row', onclick: function () { reconsider(t); },
-        }, [
-          h('div', { class: 'body' }, [
-            h('div', { class: 'ttl' }, [(t.kind === 'sell' ? '卖 ' : '买 ') + t.category]),
-            h('div', { class: 'sub2' }, [
-              (t.reason || '没写理由') + ' · ' + md(t.doneAt),
-            ]),
-          ]),
-          h('div', { class: 'amt dim' }, [
-            h('span', { class: 'u' }, ['¥']), money(t.target),
-          ]),
-          h('span', { class: 'chev' }),
-        ]));
-      });
-      w.appendChild(dl);
-    }
-
-    // ---- 每一期的总额变化 ----
-    w.appendChild(h('h2', {}, ['每期总额']));
-    w.appendChild(h('div', { class: 'hint', style: 'margin-bottom:8px' }, [
-      '大数是**总资产**;右下角的涨跌只算**组合** —— ' +
-      '组合外那部分(MSFT、房产)是估值,一改就会让「市场赚了多少」凭空跳一下。',
-    ]));
-    var sl = h('div', { class: 'list' });
-    var snapRows = [];
-    snaps.slice().reverse().forEach(function (s, i, arr) {
-      var prev = arr[i + 1];
-      var d = Ledger.delta(s, prev);
-      var row = h('div', {
-        class: 'list-row', onclick: function () { openSnapshot(s); },
-      }, [
-        h('div', { class: 'body' }, [
-          h('div', { class: 'ttl' }, [s.date]),
-          h('div', { class: 'sub2' }, [
-            // ⚠️ 三种情况说三句不同的话:第一期 / 分得开 / 分不开。
-            //    第三种最要紧 —— 不许拿总额当涨跌。
-            (d.external ? '组合 ' + money(d.total) + ' · 组合外 ' + money(d.external) + ' · ' : '') +
-            (d.change == null ? '第一期'
-              : d.market == null
-                ? signed(d.change) + ',分不出涨跌'
-                : '工资−花费 ' + signed(d.inflow) + ' · 涨跌 ' + signed(d.market)),
-          ]),
-        ]),
-      ]);
-      // ⚠️ 涨跌**不着色**。样式表开头就写着「钱的事不用高饱和,也不该是绿的」——
-      //    而且涨红跌绿还是涨绿跌红,中西正好相反,一眼看去容易读反。
-      //    `+` / `−` 本来就说清楚了。
-      // ⚠️ 主数字给**总资产**(组合 + 组合外),和首页顶上那个大数一致。
-      //    只给组合口径的话,两页对同一天显示两个不同的总额 ——
-      //    而你根本不知道差的那一块去哪了。
-      //    但**涨跌仍然只按组合算**:组合外那部分是拍脑袋估的估值,
-      //    一改就会让「市场让我赚了多少」凭空跳一下。
-      row.appendChild(h('div', { class: 'amt' }, [
-        h('span', { class: 'u' }, ['¥']), money(d.total + (d.external || 0)),
-        h('div', { class: 'sub2', style: 'font-weight:500' },
-          [d.market != null ? signed(d.market) : d.change != null ? '涨跌未知' : '']),
-      ]));
-      snapRows.push(row);
+  var historyType = 'snapshots', query = '', year = '', limit = 20;
+  var resultsNode = null;
+  function refreshResults() {
+    var next = historyResults();
+    if (resultsNode && resultsNode.parentNode) resultsNode.parentNode.replaceChild(next, resultsNode);
+    resultsNode = next;
+  }
+  function historyResults() {
+    var w = h('div', { id: 'history-results' });
+    var snaps = Store.get('snapshots', []) || [], todos = Todos.all(), flows = Todos.flows();
+    var latest = Ledger.latest(snaps), names = {};
+    Config.allKnown().forEach(function (f) { names[f.code] = f.name || f.code; });
+    var pending = {};
+    if (latest) Actions.between(latest, null).forEach(function (f) { pending[f.id] = true; });
+    var rows = historyType === 'snapshots' ? snaps.slice() : historyType === 'flows'
+      ? flows.slice() : todos.filter(function (t) { return t.status === 'dropped'; });
+    rows.sort(function (a, b) { return (b.date || b.doneAt || '').localeCompare(a.date || a.doneAt || ''); });
+    var q = query.trim().toLowerCase();
+    rows = rows.filter(function (r) {
+      var date = r.date || r.doneAt || '';
+      return (!year || date.slice(0, 4) === year) &&
+        (!q || [date, r.category, r.code, names[r.code], r.note, r.reason].join(' ').toLowerCase().indexOf(q) >= 0);
     });
-    collapsible('snaps', snapRows, sl);
-    w.appendChild(sl);
-
-    // ⚠️ 这里**没有「钱去哪了」那一段**,是删掉的。
-    //    它按类别汇总净投入,和上面「做过什么」同一份 flows[],
-    //    只是换了个聚合方式 —— 而这个工具一个月记几笔、一年二三十笔,
-    //    在这个量级上汇总几乎不产生新信息,两块看着就是同一件事排两遍。
-    //    真正有价值的汇总(投入 **和** 涨跌一起看)在统计页「各类贡献」:
-    //    光知道往黄金投了多少没用,得知道投进去之后它给了你什么。
-
-    el.appendChild(w);
+    w.appendChild(h('p', { class: 'hint result-count' }, ['找到 ' + rows.length + (historyType === 'flows' ? ' 笔买卖' : ' 条记录') +
+      ' · 显示 ' + Math.min(limit, rows.length) + ' 条']));
+    if (!rows.length) w.appendChild(h('div', { class: 'note' }, ['没有匹配的记录，试试调整年份或搜索词。']));
+    var month = '';
+    rows.slice(0, limit).forEach(function (r) {
+      var date = r.date || r.doneAt || '', m = date.slice(0, 7);
+      if (m !== month) { month = m; w.appendChild(h('h2', { class: 'history-month' }, [m.replace('-', ' 年 ') + ' 月'])); }
+      if (historyType === 'snapshots') {
+        var i = snaps.findIndex(function (s) { return s.date === r.date; });
+        var d = Ledger.delta(r, i > 0 ? snaps[i - 1] : null);
+        var row = h('button', { class: 'history-card', onclick: function () { openSnapshot(r); } }, [
+          h('div', { class: 'range-line' }, [h('b', {}, [r.date + ' 盘点']), h('span', { class: 'tag' }, [d.market == null ? '盈亏未知' : '可核算'])]),
+          h('div', { class: 'history-total amount' }, ['¥' + money(d.total + (d.external || 0))]),
+          h('div', { class: 'hint' }, ['总资产含组合外 · 投资盈亏只按组合']),
+          h('div', { class: 'history-breakdown' }, [
+            h('span', {}, ['投资盈亏 ', h('b', { class: 'amount' }, [signed(d.market)])]),
+            h('span', {}, ['净流入 ', h('b', { class: 'amount' }, [signed(d.inflow)])]),
+          ]),
+        ]);
+        if (latest && r.date === latest.date && Object.keys(pending).length)
+          row.appendChild(h('div', { class: 'pending-label' }, ['盘点后另有 ' + Object.keys(pending).length + ' 笔，待下次对账']));
+        w.appendChild(row);
+      } else if (historyType === 'flows') {
+        var actionName = r.kind === 'sell' ? '卖出' : r.kind === 'dividend' ? '现金分红' : r.kind === 'note' ? '备注' : '买入';
+        w.appendChild(h('div', { class: 'list-row history-flow' }, [
+          h('div', { class: 'body' }, [h('div', { class: 'ttl' }, [actionName + ' · ' + (r.category || names[r.code] || r.code || '未分类')]),
+            h('div', { class: 'sub2' }, [date + (r.code ? ' · ' + (names[r.code] || r.code) : '')]),
+            h('div', { class: 'sub2' }, [pending[r.id] ? '待下次对账 · 已保存，不用重复记' : '已归入盘点区间']),
+          ]), h('div', { class: 'amt' }, [r.kind === 'note' ? '—' : money(r.amount)]),
+        ]));
+      } else {
+        w.appendChild(h('button', { class: 'history-card', onclick: function () { reconsider(r); } }, [
+          h('b', {}, [(r.kind === 'sell' ? '卖出 ' : '买入 ') + r.category]),
+          h('div', { class: 'sub2' }, [(r.reason || '没写理由') + ' · ' + date + ' · 点一下重新考虑']),
+        ]));
+      }
+    });
+    if (rows.length > limit) w.appendChild(h('button', { class: 'btn ghost', onclick: function () { limit += 20; refreshResults(); } }, ['再显示 20 条（还有 ' + (rows.length - limit) + ' 条）']));
+    return w;
+  }
+  function render() {
+    var w;
+    try {
+      if (viewing) w = snapshotView();
+      else {
+        w = h('div', { class: 'wrap dashboard' });
+        var snaps = Store.get('snapshots', []) || [], flows = Todos.flows(), dropped = Todos.all().filter(function (t) { return t.status === 'dropped'; });
+        w.appendChild(h('h1', {}, ['历史']));
+        w.appendChild(h('p', { class: 'sub' }, ['盘点与买卖分开查，每一期都能展开']));
+        if (!snaps.length) w.appendChild(h('div', { class: 'note' }, ['还没有记录，录一期就有了。']));
+        else {
+          w.appendChild(h('div', { class: 'period-tabs', role: 'group', 'aria-label': '历史记录类型' },
+            [['snapshots', '盘点 · ' + snaps.length + ' 期'], ['flows', '买卖 · ' + flows.length + ' 笔']]
+              .concat(dropped.length ? [['dropped', '决定不做 · ' + dropped.length]] : []).map(function (p) {
+                return h('button', { class: historyType === p[0] ? 'active' : '', 'aria-pressed': String(historyType === p[0]),
+                  onclick: function () { historyType = p[0]; limit = 20; query = ''; render(); } }, [p[1]]);
+              })));
+          w.appendChild(h('input', { id: 'history-search', type: 'search', class: 'history-search', value: query,
+            placeholder: historyType === 'snapshots' ? '搜索盘点日期或备注' : '搜索日期、基金、类别',
+            'aria-label': '搜索历史', oninput: function (e) { query = e.target.value; limit = 20; refreshResults(); } }));
+          var years = {};
+          snaps.concat(flows).forEach(function (s) { if (s.date) years[s.date.slice(0, 4)] = true; });
+          var select = h('select', { id: 'history-year', 'aria-label': '筛选年份',
+            onchange: function (e) { year = e.target.value; limit = 20; refreshResults(); } },
+            [['', '全部年份']].concat(Object.keys(years).sort().reverse().map(function (y) { return [y, y + ' 年']; })).map(function (v) {
+              return h('option', { value: v[0], selected: year === v[0] ? '' : null }, [v[1]]);
+            }));
+          w.appendChild(h('div', { class: 'history-controls' }, [select, h('span', { class: 'hint' }, ['最近在前 · 按月分组'])]));
+          w.appendChild(h('div', { class: 'coverage-note' }, [
+            h('b', {}, ['记录 ' + snaps[0].date + ' — ' + snaps[snaps.length - 1].date]),
+            h('div', { class: 'hint' }, ['完整买卖记录起点：' + (Actions.since() || '尚未声明') + '。此前盈亏未知，不猜算。']),
+          ]));
+          resultsNode = historyResults(); w.appendChild(resultsNode);
+        }
+      }
+    } catch (e) {
+      console.error('历史显示失败:', e.message);
+      w = h('div', { class: 'wrap' }, [h('h1', {}, ['暂时无法显示这条记录']),
+        h('div', { class: 'note warn' }, ['资产记录没有修改。请先到设置导出备份，再检查基金配置。']),
+        h('button', { class: 'btn ghost', onclick: function () { viewing = null; render(); } }, ['返回历史'])]);
+    }
+    el.innerHTML = ''; el.appendChild(w);
+    var key = viewing ? viewing.snap.date : '';
+    if (key !== lastView) { lastView = key; Dom.toTop(); }
   }
 
   /** 点某一期 → 进详情屏。
@@ -234,38 +184,15 @@ var HistoryUI = (function () {
 
     w.appendChild(h('h1', {}, [v.snap.date]));
 
-    // 那天的账 —— 和首页 hero 一个格式,不用重新适应。
-    //
-    // ⚠️ **结构必须和 now.js 那份逐字一致**。这两处是各写一遍的,
-    //    改版时我只动了 now.js,这边就成了「新背景 + 旧结构」:
-    //    数字贴着顶(inline 的 padding-top:0 把卡片内边距干掉了)、
-    //    组合和组合外挤成一行没样式的灰字。
-    //    抽成共享组件才是根治 —— 在那之前,改一边**务必**回来改这边。
-    var hero = h('div', { class: 'hero' });
-    hero.appendChild(h('div', { class: 'hero-cap' }, ['当期总额']));
-    hero.appendChild(h('div', { class: 'hero-num' },
-                       ['¥' + money(d.total + (d.external || 0))]));
-    var split = h('div', { class: 'hero-split' });
-    split.appendChild(h('div', {}, [
-      h('span', { class: 'k' }, ['投资组合']),
-      h('span', { class: 'v' }, ['¥' + money(d.total)]),
-    ]));
-    if (d.external) {
-      split.appendChild(h('div', {}, [
-        h('span', { class: 'k' }, ['组合外']),
-        h('span', { class: 'v' }, ['¥' + money(d.external)]),
-      ]));
-    }
-    hero.appendChild(split);
-    w.appendChild(hero);
+    w.appendChild(Dom.hero(d.total, d.external || 0, '当期总资产'));
 
     if (d.change != null) {
       w.appendChild(h('div', { class: 'list' }, [
-        infoRow('工资 − 花费', d.inflow == null ? '那时候还没记买卖' : null,
+        infoRow('外部净流入（推算）', d.inflow == null ? '买卖记录不完整' : '包含未单列的现金类利息，不等于工资减花费',
                 d.inflow == null ? '—' : signed(d.inflow)),
         infoRow('市场涨跌', d.market == null ? '分不出来' : null,
                 d.market == null ? '—' : signed(d.market)),
-        infoRow('总额变化', '相对上一期 ' + (v.prev ? v.prev.date : ''), signed(d.change)),
+        infoRow('组合总额变化', '相对上一期 ' + (v.prev ? v.prev.date : ''), signed(d.change)),
       ]));
     }
 
@@ -292,7 +219,7 @@ var HistoryUI = (function () {
         ]));
       });
       w.appendChild(l);
-      var sum = rows.reduce(function (a, r) { return a + r.market; }, 0);
+      var sum = (pf || []).reduce(function (a, r) { return a + r.market; }, 0);
       w.appendChild(h('div', { class: 'hint' }, [
         '合计涨跌 **' + signed(sum) + '** · 已经减掉你自己买进去的钱。',
       ]));

@@ -32,7 +32,7 @@ var SettingsUI = (function () {
     return String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
   }
   function pct(x) { return x == null ? '—' : (x * 100).toFixed(1).replace(/\.0$/, '') + '%'; }
-  function st() { return Store.get('settings', {}) || {}; }
+  function st() { return Config.get(); }
   function save(patch) { Config.save(patch); if (onChanged) onChanged(); render(); }
 
   var lastView = null;   // 换了一屏才回顶部，重渲染不动
@@ -51,6 +51,13 @@ var SettingsUI = (function () {
     var sm = snap ? Portfolio.summarize(snap, s) : null;
 
     w.appendChild(h('h1', {}, ['设置']));
+    var rawSettings = Store.get('settings', {}) || {};
+    var emptyEntries = ['funds', 'retired'].reduce(function (n, key) {
+      return n + (Array.isArray(rawSettings[key]) ? rawSettings[key].filter(function (f) { return !f; }).length : 0);
+    }, 0);
+    if (emptyEntries) w.appendChild(h('div', { class: 'note' }, [
+      '旧配置中有 ' + emptyEntries + ' 条空基金记录，显示时已忽略；历史金额和交易未改动。下次保存基金配置时会清理空项。',
+    ]));
 
     // ---- 未分类:排最上面,因为它在让账目对不上 ----
     //
@@ -60,7 +67,7 @@ var SettingsUI = (function () {
     //    于是那一期的类别汇总和总额对不上,你还查不出差在哪。
     var funds = s.funds || [];
     var known = {};
-    funds.forEach(function (f) { known[f.code] = 1; });
+    Config.allKnown(s).forEach(function (f) { known[f.code] = 1; });
     var orphanAt = {};                    // code → [日期]
     snaps.forEach(function (sn) {
       Object.keys(sn.holdings || {}).forEach(function (c) {
@@ -1025,7 +1032,8 @@ var SettingsUI = (function () {
           body: '备份里:' + chk.summary.snapshots + ' 期(' +
                 (chk.summary.first || '?') + ' 到 ' + (chk.summary.last || '?') + ')\n' +
                 '这台设备上:' + ((cur.snapshots || []).length) + ' 期\n\n' +
-                '全部会被替换掉,不能撤销。',
+                (chk.summary.emptyFundEntries ? '旧配置含 ' + chk.summary.emptyFundEntries + ' 条空基金项，读取时会兼容忽略，不改历史金额。\n\n' : '') +
+                '会先留一个回滚点，然后整份替换本机记录。',
           ok: '覆盖', danger: true,
         }).then(function (ok) {
           if (!ok) return;

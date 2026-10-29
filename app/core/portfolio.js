@@ -7,10 +7,21 @@
 
 var Portfolio = (function () {
 
+  // 同一代码只保留一份定义，现役优先。旧配置的 null 不是一只基金。
+  function knownFunds(settings) {
+    settings = settings || {};
+    var by = {};
+    (Array.isArray(settings.retired) ? settings.retired : [])
+      .concat(Array.isArray(settings.funds) ? settings.funds : []).forEach(function (f) {
+        if (f && typeof f === 'object' && typeof f.code === 'string' && f.code.trim()) by[f.code] = f;
+      });
+    return Object.keys(by).map(function (code) { return by[code]; });
+  }
+
   /** 各基金市值 → 各类别市值 */
   function byCategory(holdings, funds) {
     var cat = {};
-    funds.forEach(function (f) { cat[f.code] = f.category; });
+    (funds || []).forEach(function (f) { if (f && f.code) cat[f.code] = f.category; });
     var out = {};
     Object.keys(holdings || {}).forEach(function (code) {
       var c = cat[code];
@@ -37,7 +48,7 @@ var Portfolio = (function () {
    * @param settings {funds, targets:{类别:比例}, cashTarget, cashFloor}
    */
   function summarize(snap, settings) {
-    var funds = settings.funds || [];
+    var funds = knownFunds(settings);
     var targets = settings.targets || {};
     var held = byCategory(snap.holdings || {}, funds);
     var cash = sum(snap.cash || {});
@@ -149,7 +160,7 @@ var Portfolio = (function () {
     return out.sort(function (a, b) { return a.settleDays - b.settleDays; });
   }
 
-  return { byCategory: byCategory, sum: sum, summarize: summarize,
+  return { knownFunds: knownFunds, byCategory: byCategory, sum: sum, summarize: summarize,
            investableCash: investableCash, bucketOf: bucketOf,
            bufferCash: bufferCash, liquidNow: liquidNow, pending: pending };
 })();

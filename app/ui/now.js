@@ -109,34 +109,9 @@ var NowUI = (function () {
    *  ⚠️ 早先 now.js 和 history.js 各写了一遍,改了一边另一边就成了
    *     「新背景 + 旧结构」。同一个视觉块只许有一处定义。 */
   function heroBlock(c, withSpark) {
-    var hero = h('div', { class: 'hero' });
-    if (withSpark) {
-      var sp = sparkline(c.snaps, c.st);
-      if (sp) hero.appendChild(sp);
-    }
-    hero.appendChild(h('div', { class: 'hero-cap' }, ['总资产']));
-    hero.appendChild(h('div', { class: 'hero-num' }, ['¥' + money(c.sm.total + c.ext)]));
-    // ⚠️ 组合和组合外拆成两格,不挤在一行灰字里 ——
-    //    「这两个加起来才是上面那个」这层关系,并排才读得出来。
-    //    组合外为 0 时整格不出现:一个写着 ¥0 的格子只会让人以为漏填了。
-    var split = h('div', { class: 'hero-split' });
-    split.appendChild(h('div', {}, [
-      h('span', { class: 'k' }, ['投资组合']),
-      h('span', { class: 'v' }, ['¥' + money(c.sm.total)]),
-    ]));
-    if (c.ext) {
-      split.appendChild(h('div', {}, [
-        h('span', { class: 'k' }, ['组合外']),
-        h('span', { class: 'v' }, ['¥' + money(c.ext)]),
-      ]));
-    }
-    hero.appendChild(split);
-    hero.appendChild(h('div', { class: 'hero-sub' }, [
-      h('span', { class: 'pill' + (c.stale ? ' warn' : '') }, [
-        c.snap.date.slice(5).replace('-', '/') +
-        (c.age > 0 ? ' · ' + c.age + ' 天前' : ' · 今天'),
-      ]),
-    ]));
+    var hero = Dom.hero(c.sm.total, c.ext, '总资产 · 含组合外');
+    if (withSpark) { var sp = sparkline(c.snaps, c.st); if (sp) hero.appendChild(sp); }
+    hero.appendChild(h('div', { class: 'hero-sub' }, [c.snap.date + ' 盘点 · 非实时余额']));
     return hero;
   }
 
@@ -151,95 +126,55 @@ var NowUI = (function () {
    *     总额涨了五万多,其中哪部分是赚的、哪部分是你搬进去的,只有这儿分得开。
    */
   function renderHome(w, c) {
+    w.className = 'wrap dashboard';
+    w.appendChild(h('h1', {}, ['现在']));
+    w.appendChild(h('p', { class: 'sub' }, [c.snap.date + ' 盘点 · 非实时余额']));
     w.appendChild(heroBlock(c, true));
-
-    if (c.extBlank.length) {
-      w.appendChild(h('div', {
-        class: 'note', style: 'margin-bottom:12px', onclick: function () { onEntry(); },
-      }, [
-        c.extBlank.join('、') + ' 还没填过金额,**没算进上面这个数** —— 录入时补一下。',
-      ]));
-    }
-
-    // ---- 上一期发生了什么 ----
+    if (c.extBlank.length) w.appendChild(h('div', { class: 'note', onclick: onEntry }, [c.extBlank.join('、') + ' 还没填金额，点此补录。']));
     var prev = c.snaps.length > 1 ? c.snaps[c.snaps.length - 2] : null;
     var d = prev ? Ledger.delta(c.snap, prev) : null;
-    if (d && d.change != null) {
-      // ⚠️ 别叫「上一期」。它显示的是**最近这一期**发生的事
-      //    (从上次对账到这次对账之间),而「上一期」听起来像「过去那一期」——
-      //    于是你今天记的买卖出现在这里就很诡异:明明是今天的事,
-      //    怎么算到「上一期」头上去了。
-      //    区间的归属规则是:两次对账之间发生的一切,都归后一次。
-      w.appendChild(h('h2', {}, [
-        '这一期',
-        h('span', { class: 'n' }, [
-          prev.date.slice(5).replace('-', '/') + ' → ' + c.snap.date.slice(5).replace('-', '/'),
-        ]),
+    if (d) {
+      w.appendChild(h('div', { class: 'section-heading' }, [h('h2', {}, ['这一期']), h('span', { class: 'hint' }, [prev.date.slice(5) + ' — ' + c.snap.date.slice(5)])]));
+      w.appendChild(h('div', { class: 'metric-grid' }, [
+        h('div', { class: 'metric-card' }, [h('span', {}, ['投资盈亏']), h('b', { class: 'amount' }, [Dom.signed(d.market)]), h('small', {}, [d.market == null ? '买卖不全，盈亏未知' : '已剔除买卖本金'])]),
+        h('div', { class: 'metric-card' }, [h('span', {}, ['外部净流入']), h('b', { class: 'amount' }, [Dom.signed(d.inflow)]), h('small', {}, ['由现金与买卖推算'])]),
       ]));
-      var dl = h('div', { class: 'list' });
-      // ⚠️ 分不出来的时候写「—」并说明为什么,**不拿总额倒推**。
-      //    倒推出来的曲线和真的长得一模一样,而你会拿它做决定。
-      dl.appendChild(statRow('市场涨跌', d.market,
-        d.market == null ? '要先记买卖才分得出来' : '钱自己赚的,不含你投进去的'));
-      dl.appendChild(statRow('工资 − 花费', d.inflow,
-        d.inflow == null ? '同上' : '这段时间净流入组合的钱'));
-      dl.appendChild(statRow('总额变化', d.change, '上面两项之和'));
-      w.appendChild(dl);
-      if (d.market == null) {
-        w.appendChild(h('div', { class: 'hint' }, [
-          '**记买卖就够了** —— 涨跌和投入是解出来的,一个数都不用手填。',
-        ]));
-      }
-
-      // 涨跌的正负不能证明交易未到账,也不能用它猜结算日。
+      w.appendChild(h('div', { class: 'hint', style: 'margin-top:8px' }, ['组合总额变化 ' + Dom.signed(d.change) + ' · 现金类利息未单列，不等于工资减花费。']));
     }
-
-    // ---- 还没归期的买卖 ----
-    //
-    // ⚠️ **记了买卖但还没录下一期时,那几笔不属于任何区间。**
-    //    上面那三个数是「上次对账 → 这次对账」之间的事,和它们无关 ——
-    //    可页面上要是一个字不说,你会以为「我记了怎么没反应」,
-    //    然后去翻是不是没记上,或者干脆再记一遍。
     var pending = Actions.between(c.snap, null).filter(function (a) { return Actions.MONEY[a.kind]; });
     if (pending.length) {
-      var pn = 0;
-      pending.forEach(function (a) { pn += (a.kind === 'buy' ? 1 : -1) * a.amount; });
-      w.appendChild(h('div', { class: 'note', style: 'margin-top:16px' }, [
-        c.snap.date.slice(5).replace('-', '/') + ' **盘点后已记 ' + pending.length +
-        ' 笔,待下次对账**(净 ¥' + money(pn) + ')。买卖记录已保存,不用重复记。' +
-        '上方余额仍是盘点时的数,这些交易不改写上一期收益。' +
-        '下次照实录入已包含这些买卖的现金和持仓,不要再手工加减买入金额。',
-      ]));
+      var pendingBox = h('div', { class: 'coverage-note pending-note' }, [
+        h('b', {}, [c.snap.date.slice(5).replace('-', '/') + ' 盘点后已记 ' + pending.length + ' 笔,待下次对账']),
+        h('div', { class: 'hint' }, ['已保存，不用重复记。余额仍是盘点时的数，买卖不改写上一期收益；下次照实抄余额，不要手动加减买入金额。']),
+        h('button', { class: 'link', onclick: function () {
+          Modal.note({ title: '盘点后已记 · 待下次对账', body: pending.map(function (f) {
+            return f.date + ' ' + (f.kind === 'sell' ? '卖出' : f.kind === 'dividend' ? '现金分红' : '买入') + ' ' + (f.category || f.code || '未分类') + ' ¥' + money(f.amount);
+          }).join('\n') + '\n有待对账买卖时，先核对余额，再生成新方案。' });
+        } }, ['查看这 ' + pending.length + ' 笔记录 ›']),
+      ]);
+      w.appendChild(pendingBox);
     }
-
-    // ---- 同步没跟上 ----
-    //
-    // ⚠️ **只在没跟上的时候出现。** 一切正常时说「已同步」是噪音:
-    //    它每次都在,于是你不再看它,那它真的变成「未同步」时也不会被看到。
-    //    没开同步也不提 —— 那是个选择,不是个错误。
-    if (typeof Sync !== 'undefined' && Sync.ready() && Sync.cfg().dirty) {
-      w.appendChild(h('div', { class: 'note warn', style: 'margin-top:16px' }, [
-        '有改动**还没推到云端**。断网的时候这是正常的 —— 联网后会自己重试。',
-      ]));
-    }
-
-    // ---- 入口 ----
-    w.appendChild(h('button', {
-      class: 'btn', style: 'margin-top:24px', onclick: function () { onEntry(); },
-    }, [c.stale ? '录 ' + monthLabel() + '的数字' : '再录一期']));
-    w.appendChild(h('button', {
-      class: 'btn ghost', style: 'margin-top:8px', onclick: recordOne,
-    }, ['记一笔买卖']));
-
-    // ⚠️ **方案屏必须留一个门。** 主界面不显示清单是你选的,
-    //    但没有入口的话,录入那一次看完就再也回不去了 ——
-    //    而清单是跨天的:今天买了黄金没买中短债,明天还得找得到它。
-    //    以前踩过一次「整页没有一处能点」,不能再踩第二次。
+    if (typeof Sync !== 'undefined' && Sync.ready() && Sync.cfg().dirty)
+      w.appendChild(h('div', { class: 'note warn' }, ['有改动还没推到云端，请到设置同步。同步不是独立备份。']));
+    w.appendChild(h('div', { class: 'button-pair' }, [
+      h('button', { class: 'btn', onclick: onEntry }, [c.stale ? '录这个月的数字' : '录入最新余额']),
+      h('button', { class: 'btn ghost', onclick: recordOne }, ['记一笔买卖']),
+    ]));
     var open = Todos.open().length;
-    w.appendChild(h('button', {
-      class: 'link', style: 'margin-top:12px;display:block;width:100%',
-      onclick: function () { view = 'plan'; render(); },
-    }, [open ? '这个月该做什么 · 还欠 ' + open + ' 件 ›' : '这个月该做什么 ›']));
+    w.appendChild(h('button', { class: 'link', style: 'width:100%;margin-top:8px', onclick: function () { view = 'plan'; render(); } },
+      [open ? '这个月该做什么 · 还欠 ' + open + ' 件 ›' : '这个月该做什么 ›']));
+    var allocation = h('details', { class: 'secondary-details' }, [h('summary', {}, ['盘点时的配置 · 全部 ' + c.sm.rows.length + ' 类'])]);
+    c.sm.rows.forEach(function (r) {
+      allocation.appendChild(h('div', { class: 'allocation-row', style: '--c:' + Palette.color(r.category) }, [
+        h('span', {}, [h('i', { class: 'dot' }), r.category]),
+        h('div', { class: 'allocation-track' }, [h('i', { style: 'width:' + Math.min(100, r.pct * 100) + '%' }),
+          r.target != null ? h('span', { class: 'target-marker', style: 'left:' + r.target * 100 + '%' }) : '']),
+        h('span', { class: 'small' }, [pct(r.pct) + ' / ' + (r.target == null ? '无目标' : pct(r.target))]),
+      ]));
+    });
+    allocation.appendChild(h('div', { class: 'hint' }, ['当前 / 目标占比；竖线是目标。待对账交易未计入，不是实时配置。']));
+    w.appendChild(allocation);
+    w.appendChild(h('div', { class: 'hint footer-note' }, ['完整买卖记录起点：' + (Actions.since() || '尚未声明') + ' · 更早收益不猜算']));
   }
 
   /** 一行数字 —— 正负用颜色区分,分不出来的写「—」。 */
@@ -255,6 +190,18 @@ var NowUI = (function () {
     ]);
   }
 
+  function removeAct(a) {
+    Modal.confirm({ title: '删除这条误记的买卖？',
+      body: a.date + ' · ' + (a.category || a.code) + ' · ¥' + money(a.amount) +
+        '。仅在这笔交易实际没有发生时删除。真实成交不能当误记删掉。', ok: '删除误记', danger: true,
+    }).then(function (yes) {
+      if (!yes) return;
+      var todo = Todos.all().filter(function (t) { return t.id === a.todoId && t.lastSnap === a.planDate; })[0];
+      if (todo) Todos.undo(todo.id); else Actions.remove(a.id);
+      render();
+    });
+  }
+
   var lastView = null;   // 换了一屏才回顶部，重渲染不动
 
   function render() {
@@ -264,7 +211,7 @@ var NowUI = (function () {
     var vNow = String(view);
     if (vNow !== lastView) { lastView = vNow; Dom.toTop(); }
     var w = h('div', { class: 'wrap' });
-    var st = Store.get('settings', {}) || {};
+    var st = Config.get();
     var snaps = Store.get('snapshots', []) || [];
     var snap = Ledger.latest(snaps);
 
@@ -318,6 +265,22 @@ var NowUI = (function () {
     }
 
     var body = h('div', stale ? { style: 'opacity:.6' } : {});
+
+    var unaccounted = Actions.between(snap, null).filter(function (a) { return Actions.MONEY[a.kind]; });
+    // 本期 todo 以稳定 id 防重；临时记的或来自旧期的交易不能据旧余额生成新计划。
+    if (unaccounted.some(function (a) { return !a.todoId || a.planDate !== snap.date; })) {
+      w.appendChild(h('div', { class: 'note warn' }, ['有待对账买卖，先录入已包含这些交易的真实余额，再生成新方案。不要重复执行旧余额的建议。']));
+      unaccounted.forEach(function (a) {
+        w.appendChild(h('button', { class: 'history-card', onclick: function () { removeAct(a); } }, [
+          h('b', {}, [(a.kind === 'sell' ? '卖出 ' : a.kind === 'dividend' ? '现金分红 ' : '买入 ') + (a.category || a.code)]),
+          h('div', { class: 'hint amount' }, [a.date + ' · ¥' + money(a.amount) + ' · 点此核对或删除误记']),
+        ]));
+      });
+      w.appendChild(h('button', { class: 'btn', onclick: onEntry }, ['录入最新余额']));
+      w.appendChild(h('button', { class: 'link', onclick: function () { view = 'home'; render(); } }, ['知道了']));
+      el.appendChild(w); return;
+    }
+    if (unaccounted.length) w.appendChild(h('div', { class: 'note' }, ['下面是同一次盘点生成的已有计划；做过的项目已保留完成状态，不是新一轮买入建议。']));
 
     // ---- 该做什么 ----
     //
@@ -689,7 +652,7 @@ var NowUI = (function () {
       var last = Ledger.latest(Store.get('snapshots', []) || []);
       Actions.startFrom(last ? last.date : today());
     }
-    var st = Store.get('settings', {}) || {};
+    var st = Config.get();
     var funds = st.funds || [];
     if (!funds.length) {
       Modal.note({ title: '还没有基金清单', body: '先去设置里加一只。' });

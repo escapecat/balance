@@ -4,3 +4,5 @@
 token*
 node_modules/
 __pycache__/
+design-previews/
+artifacts/

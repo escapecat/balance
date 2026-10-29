@@ -49,7 +49,8 @@ var HistoryUI = (function () {
   var viewing = null;    // 正在看哪一期的详情
   var lastView = null;   // 换了一屏才回顶部，重渲染不动
 
-  var historyType = 'snapshots', query = '', year = '', limit = 20;
+  var historyType = 'snapshots', query = '', year = '', month = '', pageIndex = 0;
+  var filtering = false, monthPage = 0;
   var resultsNode = null;
   function refreshResults() {
     var next = historyResults();
@@ -64,28 +65,25 @@ var HistoryUI = (function () {
     var pending = {};
     if (latest) Actions.between(latest, null).forEach(function (f) { pending[f.id] = true; });
     var rows = historyType === 'snapshots' ? snaps.slice() : historyType === 'flows'
-      ? flows.slice() : todos.filter(function (t) { return t.status === 'dropped'; });
+      ? flows.slice() : historyType === 'reviews' ? Strategy.reviews().slice() : todos.filter(function (t) { return t.status === 'dropped'; });
     rows.sort(function (a, b) { return (b.date || b.doneAt || '').localeCompare(a.date || a.doneAt || ''); });
     var q = query.trim().toLowerCase();
     rows = rows.filter(function (r) {
       var date = r.date || r.doneAt || '';
-      return (!year || date.slice(0, 4) === year) &&
+      return (!month || date.slice(0, 7) === month) && (!year || date.slice(0, 4) === year) &&
         (!q || [date, r.category, r.code, names[r.code], r.note, r.reason].join(' ').toLowerCase().indexOf(q) >= 0);
     });
-    w.appendChild(h('p', { class: 'hint result-count' }, ['找到 ' + rows.length + (historyType === 'flows' ? ' 笔买卖' : ' 条记录') +
-      ' · 显示 ' + Math.min(limit, rows.length) + ' 条']));
+    pageIndex = Math.max(0, Math.min(pageIndex, Math.ceil(rows.length / 3) - 1));
+    w.appendChild(h('p', { class: 'hint result-count' }, [rows.length + (historyType === 'flows' ? ' 笔买卖' : ' 条记录') + ' · 最近在前 · 每页至多 3 条']));
     if (!rows.length) w.appendChild(h('div', { class: 'note' }, ['没有匹配的记录，试试调整年份或搜索词。']));
-    var month = '';
-    rows.slice(0, limit).forEach(function (r) {
-      var date = r.date || r.doneAt || '', m = date.slice(0, 7);
-      if (m !== month) { month = m; w.appendChild(h('h2', { class: 'history-month' }, [m.replace('-', ' 年 ') + ' 月'])); }
+    rows.slice(pageIndex * 3, pageIndex * 3 + 3).forEach(function (r) {
+      var date = r.date || r.doneAt || '';
       if (historyType === 'snapshots') {
         var i = snaps.findIndex(function (s) { return s.date === r.date; });
         var d = Ledger.delta(r, i > 0 ? snaps[i - 1] : null);
         var row = h('button', { class: 'history-card', onclick: function () { openSnapshot(r); } }, [
           h('div', { class: 'range-line' }, [h('b', {}, [r.date + ' 盘点']), h('span', { class: 'tag' }, [d.market == null ? '盈亏未知' : '可核算'])]),
           h('div', { class: 'history-total amount' }, ['¥' + money(d.total + (d.external || 0))]),
-          h('div', { class: 'hint' }, ['总资产含组合外 · 投资盈亏只按组合']),
           h('div', { class: 'history-breakdown' }, [
             h('span', {}, ['投资盈亏 ', h('b', { class: 'amount' }, [signed(d.market)])]),
             h('span', {}, ['净流入 ', h('b', { class: 'amount' }, [signed(d.inflow)])]),
@@ -102,6 +100,9 @@ var HistoryUI = (function () {
             h('div', { class: 'sub2' }, [pending[r.id] ? '待下次对账 · 已保存，不用重复记' : '已归入盘点区间']),
           ]), h('div', { class: 'amt' }, [r.kind === 'note' ? '—' : money(r.amount)]),
         ]));
+      } else if (historyType === 'reviews') {
+        w.appendChild(h('div', { class: 'history-card review-history' }, [h('b', {}, [date + ' · ' + (r.kind === 'half' ? '半年检查' : '年度检查')]),
+          h('div', { class: 'sub2' }, [r.kind === 'half' ? '已检查，不交易' : r.decision === 'approved' ? '确认生成卖出计划，不代表已成交' : '已检查，暂不交易'])]));
       } else {
         w.appendChild(h('button', { class: 'history-card', onclick: function () { reconsider(r); } }, [
           h('b', {}, [(r.kind === 'sell' ? '卖出 ' : '买入 ') + r.category]),
@@ -109,41 +110,51 @@ var HistoryUI = (function () {
         ]));
       }
     });
-    if (rows.length > limit) w.appendChild(h('button', { class: 'btn ghost', onclick: function () { limit += 20; refreshResults(); } }, ['再显示 20 条（还有 ' + (rows.length - limit) + ' 条）']));
+    w.appendChild(Dom.pager(pageIndex, rows.length, 3, function (p) { pageIndex = p; refreshResults(); Dom.toTop(); }));
+    return w;
+  }
+  function filterScreen() {
+    var snaps = Store.get('snapshots', []) || [], flows = Todos.flows(), months = {};
+    snaps.concat(flows, Strategy.reviews()).forEach(function (r) { if (r.date) months[r.date.slice(0, 7)] = true; });
+    var allMonths = Object.keys(months).sort().reverse();
+    var w = h('div', { class: 'wrap' }, [Dom.backBar('查找记录', function () { filtering = false; pageIndex = 0; render(); }),
+      h('input', { id: 'history-search', type: 'search', class: 'history-search', value: query, placeholder: '搜索日期、基金、类别或备注', 'aria-label': '搜索历史', oninput: function (e) { query = e.target.value; pageIndex = 0; } })]);
+    var years = {};
+    allMonths.forEach(function (m) { years[m.slice(0, 4)] = true; });
+    w.appendChild(h('select', { id: 'history-year', class: 'history-year', 'aria-label': '筛选年份', onchange: function (e) { year = e.target.value; month = ''; pageIndex = 0; } },
+      [['', '全部年份']].concat(Object.keys(years).sort().reverse().map(function (y) { return [y, y + ' 年']; })).map(function (v) {
+        return h('option', { value: v[0], selected: year === v[0] ? '' : null }, [v[1]]);
+      })));
+    w.appendChild(h('h2', {}, ['按月查看']));
+    w.appendChild(Dom.menuRow('最近记录', '清除月份、年份和搜索条件', function () { month = ''; year = ''; query = ''; pageIndex = 0; filtering = false; render(); }));
+    var grid = h('div', { class: 'month-grid' });
+    allMonths.slice(monthPage * 9, monthPage * 9 + 9).forEach(function (m) {
+      grid.appendChild(h('button', { class: month === m ? 'active' : '', onclick: function () { month = m; year = ''; query = ''; pageIndex = 0; filtering = false; render(); } }, [m]));
+    });
+    w.appendChild(grid);
+    if (allMonths.length > 9) w.appendChild(Dom.pager(monthPage, allMonths.length, 9, function (p) { monthPage = p; render(); Dom.toTop(); }));
+    w.appendChild(h('button', { class: 'btn', onclick: function () { filtering = false; pageIndex = 0; render(); } }, ['查看结果']));
+    w.appendChild(h('div', { class: 'hint footer-note' }, ['完整买卖记录起点：' + (Actions.since() || '尚未声明') + '；此前盈亏未知，不猜算。']));
     return w;
   }
   function render() {
     var w;
     try {
-      if (viewing) w = snapshotView();
+      if (filtering) w = filterScreen();
+      else if (viewing) w = snapshotView();
       else {
-        w = h('div', { class: 'wrap dashboard' });
+        w = h('div', { class: 'wrap screen-root history-screen' });
         var snaps = Store.get('snapshots', []) || [], flows = Todos.flows(), dropped = Todos.all().filter(function (t) { return t.status === 'dropped'; });
         w.appendChild(h('h1', {}, ['历史']));
-        w.appendChild(h('p', { class: 'sub' }, ['盘点与买卖分开查，每一期都能展开']));
         if (!snaps.length) w.appendChild(h('div', { class: 'note' }, ['还没有记录，录一期就有了。']));
         else {
           w.appendChild(h('div', { class: 'period-tabs', role: 'group', 'aria-label': '历史记录类型' },
-            [['snapshots', '盘点 · ' + snaps.length + ' 期'], ['flows', '买卖 · ' + flows.length + ' 笔']]
-              .concat(dropped.length ? [['dropped', '决定不做 · ' + dropped.length]] : []).map(function (p) {
+            [['snapshots', '盘点'], ['flows', '买卖'], ['reviews', '检查']]
+              .concat(dropped.length ? [['dropped', '未做']] : []).map(function (p) {
                 return h('button', { class: historyType === p[0] ? 'active' : '', 'aria-pressed': String(historyType === p[0]),
-                  onclick: function () { historyType = p[0]; limit = 20; query = ''; render(); } }, [p[1]]);
+                  onclick: function () { historyType = p[0]; pageIndex = 0; render(); } }, [p[1]]);
               })));
-          w.appendChild(h('input', { id: 'history-search', type: 'search', class: 'history-search', value: query,
-            placeholder: historyType === 'snapshots' ? '搜索盘点日期或备注' : '搜索日期、基金、类别',
-            'aria-label': '搜索历史', oninput: function (e) { query = e.target.value; limit = 20; refreshResults(); } }));
-          var years = {};
-          snaps.concat(flows).forEach(function (s) { if (s.date) years[s.date.slice(0, 4)] = true; });
-          var select = h('select', { id: 'history-year', 'aria-label': '筛选年份',
-            onchange: function (e) { year = e.target.value; limit = 20; refreshResults(); } },
-            [['', '全部年份']].concat(Object.keys(years).sort().reverse().map(function (y) { return [y, y + ' 年']; })).map(function (v) {
-              return h('option', { value: v[0], selected: year === v[0] ? '' : null }, [v[1]]);
-            }));
-          w.appendChild(h('div', { class: 'history-controls' }, [select, h('span', { class: 'hint' }, ['最近在前 · 按月分组'])]));
-          w.appendChild(h('div', { class: 'coverage-note' }, [
-            h('b', {}, ['记录 ' + snaps[0].date + ' — ' + snaps[snaps.length - 1].date]),
-            h('div', { class: 'hint' }, ['完整买卖记录起点：' + (Actions.since() || '尚未声明') + '。此前盈亏未知，不猜算。']),
-          ]));
+          w.appendChild(h('button', { class: 'range-picker history-filter', onclick: function () { filtering = true; render(); } }, [(month || year || '最近记录') + (query ? ' · ' + query : ''), h('span', {}, ['月份 / 查找 ›'])]));
           resultsNode = historyResults(); w.appendChild(resultsNode);
         }
       }
@@ -154,7 +165,7 @@ var HistoryUI = (function () {
         h('button', { class: 'btn ghost', onclick: function () { viewing = null; render(); } }, ['返回历史'])]);
     }
     el.innerHTML = ''; el.appendChild(w);
-    var key = viewing ? viewing.snap.date : '';
+    var key = filtering ? 'filter' : viewing ? viewing.snap.date : '';
     if (key !== lastView) { lastView = key; Dom.toTop(); }
   }
 
@@ -285,6 +296,7 @@ var HistoryUI = (function () {
     el = node;
     onChanged = (opts || {}).onChanged;
     viewing = null;
+    filtering = false;
     render();
   }
 

@@ -31,13 +31,13 @@ def check(browser, url):
       return {day,before};
     }""")
     page.reload()
-    page.get_by_role("button", name="该做什么", exact=False).click()
+    page.get_by_role("button", name="新钱补仓", exact=False).click()
     page.locator(".list-row").filter(has_text="Synthetic stock").first.click()
     page.get_by_role("button", name=re.compile(r"^做了 ")).click()
     page.locator(".modal-mask:not(.closing) input").fill("20000")
     page.get_by_role("button", name="记下", exact=True).click()
     page.locator(".subpage-bar").get_by_role("button", name="返回", exact=True).click()
-    expect(page.get_by_text("盘点后已记 1 笔,待下次对账", exact=False)).to_be_visible()
+    expect(page.get_by_text("1 笔已记，待下次对账", exact=False)).to_be_visible()
     expect(page.get_by_text("基金申购要 T+1", exact=False)).to_have_count(0)
     checks = page.evaluate("""() => {
       const s=Store.get('snapshots'),d=Ledger.delta(s[1],s[0]);
@@ -50,6 +50,8 @@ def check(browser, url):
       Ledger.saveDraft({date:day,holdings:{A:'100000',B:'80000'},cash:{c:'20000'},external:{}});
       EntryUI.mount(document.querySelector('.page'),{onDone:()=>{}});
     }""", dates["day"])
+    while page.get_by_role("button", name="下一步", exact=True).count():
+        page.get_by_role("button", name="下一步", exact=True).click()
     page.get_by_role("button", name="保存这一期", exact=True).click()
     expect(page.get_by_text("这次余额包含今天盘点后的买卖吗?", exact=True)).to_be_visible()
     page.get_by_role("button", name="只有部分到账,先不保存", exact=False).click()

@@ -91,7 +91,7 @@ ok(tn.indexOf(withCommas) >= 0 || tn.indexOf(String(wantTotal)) >= 0,
 //    所以这里分两段测:主界面有入口(不然方案屏永远到不了),
 //    方案屏有产出。合在一起测的话,「主界面没清单」这个设计
 //    和「清单算错了」这个 bug 长得一模一样。
-ok(tn.indexOf('该做什么') >= 0,
+ok(tn.indexOf('新钱补仓') >= 0,
    '★ 主界面没有通往方案屏的入口 —— 清单是跨天的,没入口就再也回不去');
 
 var plan = ctx.Allocate.planMonthly(latest, ctx.Store.get('settings', {}));
@@ -112,6 +112,10 @@ ok(plan.daily.length === 0 || tp.indexOf(plan.daily[0].category) >= 0,
 // 但写死了换一份数据这条就静默失效了。
 var se = new El('div');
 ctx.SettingsUI.mount(se, {});
+function descendants(n) { return [n].concat.apply([n], n.children.map(descendants)); }
+var fundsMenu = descendants(se).filter(function (n) { return n.tagName === 'BUTTON' && deep(n).indexOf('基金与限额') >= 0; })[0];
+ok(!!fundsMenu, '基金配置入口不能丢');
+if (fundsMenu) fundsMenu.handlers.click[0]();
 var ts = deep(se);
 var known = {};
 (ctx.Store.get('settings', {}).funds || []).forEach(function (f) { known[f.code] = 1; });

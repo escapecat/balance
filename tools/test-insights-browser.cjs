@@ -42,6 +42,28 @@ async function putSeed(page, data, version) {
   await page.getByRole('heading', { name: '现在', exact: true }).waitFor();
 }
 async function tab(page, name) { await page.locator('.tabbar button').filter({ hasText: name }).click(); }
+async function statsPeriod(page, name) {
+  await page.locator('.stats-screen > .range-picker').click();
+  await page.getByRole('button', { name, exact: true }).click();
+}
+async function historySearch(page, query, year) {
+  await page.locator('.history-filter').click();
+  await page.locator('#history-search').fill(query);
+  if (year !== undefined) await page.locator('#history-year').selectOption(year);
+  await page.getByRole('button', { name: '查看结果', exact: true }).click();
+}
+async function historySnapshot(page, date) {
+  await historySearch(page, date, '');
+  await page.getByRole('button').filter({ hasText: date + ' 盘点' }).click();
+}
+async function entryFinal(page) {
+  for (let i = 0; i < 100; i++) {
+    const next = page.getByRole('button', { name: '下一步', exact: true });
+    if (!await next.count()) return;
+    await next.click();
+  }
+  throw new Error('Entry step did not terminate');
+}
 async function main() {
   const args = process.argv.slice(2), remote = args.find(a => /^https?:/.test(a));
   let local;
@@ -63,30 +85,28 @@ async function main() {
     await page.screenshot({ path: path.join(artifacts, browserName + '-now.png') });
     await tab(page, '统计');
     assert.ok((await page.locator('.profit-number').textContent()).includes((5000).toLocaleString('zh-CN')));
-    await page.getByRole('button', { name: '本期', exact: true }).click();
+    await statsPeriod(page, '本期');
     assert.ok((await page.locator('.profit-number').textContent()).includes((3000).toLocaleString('zh-CN')));
-    await page.getByRole('button', { name: '完整记录', exact: true }).click();
+    await statsPeriod(page, '完整记录');
     await page.screenshot({ path: path.join(artifacts, browserName + '-stats.png') });
-    await page.getByRole('button', { name: '查看各类区间盈亏 ›', exact: true }).click();
-    await page.getByRole('heading', { name: '各类区间盈亏', exact: true }).waitFor();
+    await page.getByRole('button', { name: '类别', exact: true }).click();
     await page.locator('.category-row').filter({ hasText: '股' }).click();
     assert.match(await page.locator('.equation-card').textContent(), /期初市值.*期末市值/);
     await page.screenshot({ path: path.join(artifacts, browserName + '-category.png') });
     await tab(page, '历史');
-    await page.locator('#history-search').fill('09-28');
+    await historySearch(page, '09-28');
     assert.equal(await page.locator('.history-card').count(), 1);
-    await page.locator('#history-search').fill('');
-    await page.locator('#history-year').selectOption('2026');
+    await historySearch(page, '', '2026');
     for (const s of data.snapshots) {
       await page.locator('.page').evaluate(n => { n.scrollTop = n.scrollHeight; });
-      await page.getByRole('button').filter({ hasText: s.date + ' 盘点' }).click();
+      await historySnapshot(page, s.date);
       await page.getByRole('heading', { name: s.date, exact: true }).waitFor();
       assert.equal(await page.locator('.page').evaluate(n => n.scrollTop), 0);
       await page.getByRole('button', { name: '返回', exact: true }).click();
     }
     await page.screenshot({ path: path.join(artifacts, browserName + '-history.png') });
-    await page.getByRole('button', { name: '买卖 · 1 笔', exact: true }).click();
-    await page.locator('#history-search').fill('合成股票基金');
+    await page.getByRole('button', { name: '买卖', exact: true }).click();
+    await historySearch(page, '合成股票基金');
     assert.equal(await page.locator('.history-flow').count(), 1);
     assert.equal(await page.evaluate(() => JSON.stringify(Store.exportAll().data)), before, 'Browsing must not change stored ledger');
 
@@ -103,8 +123,8 @@ async function main() {
     await page.emulateMedia({ colorScheme: 'light' });
     await page.evaluate(() => Actions.add({ date: '2026-10-29', code: 'A', category: '股', kind: 'buy', amount: 5000 }));
     await tab(page, '现在');
-    assert.match(await page.locator('.pending-note').textContent(), /1 笔,待下次对账/);
-    await page.getByRole('button', { name: /这个月该做什么/ }).click();
+    assert.match(await page.locator('.pending-note').textContent(), /1 笔已记，待下次对账/);
+    await page.getByRole('button', { name: /新钱补仓/ }).click();
     assert.match(await page.locator('.page').textContent(), /先录入已包含这些交易的真实余额/);
     assert.equal(await page.locator('.page .list-row').count(), 0, 'Unreconciled manual trades must not generate a fresh executable plan');
     assert.equal(await page.evaluate(() => Store.get('todos', []).length), 0);
@@ -124,9 +144,21 @@ async function main() {
           assert.ok(await privatePage.evaluate(({ key, expected }) => JSON.stringify(Store.get(key)) === expected,
             { key, expected: JSON.stringify(backup.data[key]) }), 'Private ledger migration changed ' + key + ' (amounts suppressed)');
         }
+        // Check real-data layout without logging amounts, capturing images or connecting Sync.
+        for (const width of [360, 390, 430]) {
+          await privatePage.setViewportSize({ width, height: 740 });
+          for (const name of ['现在', '历史', '统计', '设置']) {
+            await tab(privatePage, name);
+            assert.ok(await privatePage.locator('.page').evaluate(n => n.scrollHeight <= n.clientHeight + 1), 'Private root needs scrolling: ' + name + ' at ' + width + ' (amounts suppressed)');
+            if (name === '统计') for (const view of ['概览', '走势', '类别']) {
+              await privatePage.getByRole('button', { name: view, exact: true }).click();
+              assert.ok(await privatePage.locator('.page').evaluate(n => n.scrollHeight <= n.clientHeight + 1), 'Private stats needs scrolling: ' + view + ' at ' + width + ' (amounts suppressed)');
+            }
+          }
+        }
         for (const s of backup.data.snapshots) {
           await privatePage.evaluate(() => HistoryUI.mount(document.querySelector('.page')));
-          await privatePage.getByRole('button').filter({ hasText: s.date + ' 盘点' }).click();
+          await historySnapshot(privatePage, s.date);
           await privatePage.getByRole('heading', { name: s.date, exact: true }).waitFor();
         }
         const integrity = await privatePage.evaluate(() => {
@@ -164,7 +196,8 @@ async function main() {
         await offlineContext.setOffline(true);
         await offlinePage.reload(); await offlinePage.getByRole('heading', { name: '现在', exact: true }).waitFor();
         await tab(offlinePage, '统计'); await offlinePage.locator('.profit-number').waitFor();
-        await tab(offlinePage, '历史'); assert.equal(await offlinePage.locator('.history-card').count(), 4);
+        await tab(offlinePage, '历史'); assert.equal(await offlinePage.locator('.history-card').count(), 3);
+        await offlinePage.getByRole('button', { name: '下一页', exact: true }).click(); assert.equal(await offlinePage.locator('.history-card').count(), 1);
         assert.equal(await offlinePage.evaluate(() => JSON.stringify(Store.exportAll().data)), original);
         offlineResult = 'pass';
       } finally { await offlineContext.close(); }
@@ -190,5 +223,5 @@ async function main() {
     if (local) await new Promise(resolve => local.server.close(resolve));
   }
 }
-module.exports = { playwright, localServer, putSeed, tab };
+module.exports = { playwright, localServer, putSeed, tab, statsPeriod, historySearch, historySnapshot, entryFinal };
 if (require.main === module) main().catch(e => { console.error(e); process.exitCode = 1; });

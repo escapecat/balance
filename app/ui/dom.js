@@ -92,7 +92,7 @@ var Dom = (function () {
     return (n < 0 ? '−' : '') + String(Math.round(Math.abs(n))).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
   }
   function signed(n) { return n == null ? '—' : (n > 0 ? '+' : '') + money(n); }
-  function hero(total, external, title) {
+  function hero(total, external, title, compact) {
     var box = h('div', { class: 'hero' }, [h('div', { class: 'hero-cap' }, [title || '总资产']),
       h('div', { class: 'hero-num amount' }, ['¥' + money(total + external)])]);
     var split = h('div', { class: 'hero-split' });
@@ -100,7 +100,7 @@ var Dom = (function () {
       if (r[0] === '组合外估值' && !external) return;
       split.appendChild(h('div', {}, [h('span', { class: 'k' }, [r[0]]), h('span', { class: 'v amount' }, ['¥' + money(r[1])])]));
     });
-    if (external) box.appendChild(split);
+    if (external && !compact) box.appendChild(split);
     return box;
   }
   function icon(name) {
@@ -126,8 +126,22 @@ var Dom = (function () {
   }
   function scrollPosition() { var page = document.querySelector('.page'); return page ? page.scrollTop : 0; }
   function restoreScroll(value) { var page = document.querySelector('.page'); if (page) page.scrollTop = value; }
+  function menuRow(title, detail, onClick) {
+    return h('button', { type: 'button', class: 'menu-row', onclick: onClick }, [
+      h('span', { class: 'body' }, [h('b', {}, [title]), detail ? h('small', {}, [detail]) : '']),
+      h('span', { class: 'menu-chevron', 'aria-hidden': 'true' }, ['›']),
+    ]);
+  }
+  function pager(page, count, size, onChange) {
+    var pages = Math.max(1, Math.ceil(count / size));
+    return h('nav', { class: 'pager', 'aria-label': '分页' }, [
+      h('button', { type: 'button', disabled: page <= 0 ? '' : null, onclick: function () { onChange(page - 1); } }, ['上一页']),
+      h('span', { 'aria-live': 'polite' }, [(page + 1) + ' / ' + pages]),
+      h('button', { type: 'button', disabled: page >= pages - 1 ? '' : null, onclick: function () { onChange(page + 1); } }, ['下一页']),
+    ]);
+  }
   return { text: text, label: label, LABEL: LABEL, toTop: toTop, h: h, money: money, signed: signed, hero: hero,
-    icon: icon, backBar: backBar, scrollPosition: scrollPosition, restoreScroll: restoreScroll };
+    icon: icon, backBar: backBar, scrollPosition: scrollPosition, restoreScroll: restoreScroll, menuRow: menuRow, pager: pager };
 })();
 
 if (typeof module !== 'undefined') module.exports = Dom;

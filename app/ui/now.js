@@ -21,6 +21,8 @@ var NowUI = (function () {
   var el, onEntry = null, onSettings = null;
   var view = 'home';
   var pendingPlan = false;   // 刚存完一期 —— 下次 mount 直接进方案屏
+  var allocationPage = 0;
+  var allocationFrom = 'home';
 
   function h(tag, attrs, kids) {
     var n = document.createElement(tag);
@@ -109,7 +111,7 @@ var NowUI = (function () {
    *  ⚠️ 早先 now.js 和 history.js 各写了一遍,改了一边另一边就成了
    *     「新背景 + 旧结构」。同一个视觉块只许有一处定义。 */
   function heroBlock(c, withSpark) {
-    var hero = Dom.hero(c.sm.total, c.ext, '总资产 · 含组合外');
+    var hero = Dom.hero(c.sm.total, c.ext, '总资产 · 含组合外', withSpark);
     if (withSpark) { var sp = sparkline(c.snaps, c.st); if (sp) hero.appendChild(sp); }
     hero.appendChild(h('div', { class: 'hero-sub' }, [c.snap.date + ' 盘点 · 非实时余额']));
     return hero;
@@ -126,59 +128,55 @@ var NowUI = (function () {
    *     总额涨了五万多,其中哪部分是赚的、哪部分是你搬进去的,只有这儿分得开。
    */
   function renderHome(w, c) {
-    w.className = 'wrap dashboard';
-    w.appendChild(h('h1', {}, ['现在']));
+    w.className = 'wrap screen-root now-overview';
+    w.appendChild(h('div', { class: 'screen-heading' }, [h('h1', {}, ['现在']), h('span', { class: 'hint' }, [c.snap.date + ' 盘点'])]));
     w.appendChild(heroBlock(c, true));
-    w.appendChild(h('div', { class: 'button-pair home-actions' }, [
-      h('button', { class: 'btn', onclick: onEntry }, [c.stale ? '录这个月的数字' : '录入最新余额']),
-      h('button', { class: 'btn ghost', onclick: function () { view = 'plan'; render(); } }, ['这个月该做什么 ›']),
-    ]));
-    w.appendChild(h('button', { class: 'link quick-record', onclick: recordOne }, [Dom.icon('plus'), '记一笔买卖']));
-    if (c.extBlank.length) w.appendChild(h('div', { class: 'note', onclick: onEntry }, [c.extBlank.join('、') + ' 还没填金额，点此补录。']));
     var prev = c.snaps.length > 1 ? c.snaps[c.snaps.length - 2] : null;
     var d = prev ? Ledger.delta(c.snap, prev) : null;
     if (d) {
-      w.appendChild(h('div', { class: 'section-heading' }, [h('h2', {}, ['这一期']), h('span', { class: 'hint' }, [prev.date.slice(5) + ' — ' + c.snap.date.slice(5)])]));
       w.appendChild(h('div', { class: 'metric-grid' }, [
-        h('div', { class: 'metric-card' }, [h('span', {}, ['投资盈亏']), h('b', { class: 'amount' }, [Dom.signed(d.market)]), h('small', {}, [d.market == null ? '买卖不全，盈亏未知' : '已剔除买卖本金'])]),
-        h('div', { class: 'metric-card' }, [h('span', {}, ['外部净流入']), h('b', { class: 'amount' }, [Dom.signed(d.inflow)]), h('small', {}, ['由现金与买卖推算'])]),
+        h('div', { class: 'metric-card' }, [h('span', {}, ['本期投资盈亏']), h('b', { class: 'amount' }, [Dom.signed(d.market)]), h('small', {}, [d.market == null ? '买卖不全，盈亏未知' : '已剔除买卖本金'])]),
+        h('div', { class: 'metric-card' }, [h('span', {}, ['本期外部净流入']), h('b', { class: 'amount' }, [Dom.signed(d.inflow)]), h('small', {}, [prev.date.slice(5) + ' — ' + c.snap.date.slice(5)])]),
       ]));
-      w.appendChild(h('div', { class: 'hint', style: 'margin-top:8px' }, ['组合总额变化 ' + Dom.signed(d.change) + ' · 现金类利息未单列，不等于工资减花费。']));
     }
+    w.appendChild(h('div', { class: 'button-pair home-actions' }, [
+      h('button', { class: 'action-tile primary', onclick: onEntry }, [Dom.icon('plus'), h('b', {}, [c.stale ? '更新余额' : '录入余额']), h('small', {}, [c.stale ? '盘点已超过 25 天' : '抄数字并对账'])]),
+      h('button', { class: 'action-tile', onclick: function () { view = 'plan'; render(); Dom.toTop(); } }, [Dom.icon('stats'), h('b', {}, ['新钱补仓']), h('small', {}, ['只买不卖 · 考虑限额'])]),
+    ]));
+    w.appendChild(Dom.menuRow('看当前配置', c.sm.rows.length + ' 类 · 盘点占比与目标', function () { allocationFrom = 'home'; view = 'allocation'; allocationPage = 0; render(); Dom.toTop(); }));
+    w.appendChild(Dom.menuRow('记一笔买卖', '实际成交后再记，不改写盘点余额', recordOne));
     var pending = Actions.between(c.snap, null).filter(function (a) { return Actions.MONEY[a.kind]; });
-    if (pending.length) {
-      var pendingBox = h('div', { class: 'coverage-note pending-note' }, [
-        h('b', {}, [c.snap.date.slice(5).replace('-', '/') + ' 盘点后已记 ' + pending.length + ' 笔,待下次对账']),
-        h('div', { class: 'hint' }, ['已保存，不用重复记。余额仍是盘点时的数，买卖不改写上一期收益；下次照实抄余额，不要手动加减买入金额。']),
-        h('button', { class: 'link', onclick: function () {
-          Modal.note({ title: '盘点后已记 · 待下次对账', body: pending.map(function (f) {
-            return f.date + ' ' + (f.kind === 'sell' ? '卖出' : f.kind === 'dividend' ? '现金分红' : '买入') + ' ' + (f.category || f.code || '未分类') + ' ¥' + money(f.amount);
-          }).join('\n') + '\n有待对账买卖时，先核对余额，再生成新方案。' });
-        } }, ['查看这 ' + pending.length + ' 笔记录 ›']),
-      ]);
-      w.appendChild(pendingBox);
+    var notices = [];
+    if (pending.length) notices.push(pending.length + ' 笔已记，待下次对账');
+    if (c.extBlank.length) notices.push('组合外 ' + c.extBlank.length + ' 项未填');
+    if (typeof Sync !== 'undefined' && Sync.ready() && Sync.cfg().dirty) notices.push('有改动未推云端');
+    if (notices.length) w.appendChild(h('button', { class: 'status-strip' + (pending.length ? ' pending-note' : ''), onclick: function () { view = 'notices'; render(); Dom.toTop(); } }, [notices.join(' · ') + ' ›']));
+    var sc = Strategy.schedule(c.st, today());
+    w.appendChild(Dom.menuRow(sc.annualDue || sc.annualRecheck ? '年度检查待处理' : sc.halfDue ? '半年检查待处理' : '下次年度检查', sc.configured ? sc.annualDate : '尚未设置日期', function () { view = 'schedule'; render(); Dom.toTop(); }));
+  }
+
+  function renderHomeDetail(w, c) {
+    var titles = { allocation: '当前配置', notices: '待核对事项', schedule: '检查安排' };
+    var previous = view === 'allocation' ? allocationFrom : 'home';
+    w.appendChild(Dom.backBar(titles[view], function () { view = previous; render(); Dom.toTop(); }));
+    if (view === 'schedule') { reviewCard(w, c); return; }
+    if (view === 'notices') {
+      if (c.extBlank.length) w.appendChild(Dom.menuRow('补录组合外金额', c.extBlank.join('、') + ' 尚未计入总资产', onEntry));
+      if (typeof Sync !== 'undefined' && Sync.ready() && Sync.cfg().dirty) w.appendChild(Dom.menuRow('有改动尚未推到云端', '前往设置 → 数据与备份；同步不等于独立备份', onSettings));
+      var pending = Actions.between(c.snap, null).filter(function (a) { return Actions.MONEY[a.kind]; });
+      if (pending.length) w.appendChild(h('div', { class: 'note' }, ['这些交易已保存，不用重复记。下次照实抄余额对账，不要手动加减买入金额。点记录可核对误记。']));
+      pendingRows(w, pending); return;
     }
-    if (typeof Sync !== 'undefined' && Sync.ready() && Sync.cfg().dirty)
-      w.appendChild(h('div', { class: 'note warn' }, ['有改动还没推到云端，请到设置同步。同步不是独立备份。']));
-    var key = Allocate.contextKey(c.snap, c.st);
-    var open = Todos.open().filter(function (t) {
-      return t.version === 3 && t.contextKey === key && t.executionDate === today() &&
-        (t.kind !== 'sell' || Strategy.approved(c.snap, c.st, today()));
-    }).length;
-    if (open) w.appendChild(h('div', { class: 'hint' }, ['本次计划还有 ' + open + ' 项未记录成交。']));
-    reviewCard(w, c);
-    var allocation = h('details', { class: 'secondary-details' }, [h('summary', {}, ['盘点时的配置 · 全部 ' + c.sm.rows.length + ' 类'])]);
-    c.sm.rows.forEach(function (r) {
-      allocation.appendChild(h('div', { class: 'allocation-row', style: '--c:' + Palette.color(r.category) }, [
-        h('span', {}, [h('i', { class: 'dot' }), r.category]),
-        h('div', { class: 'allocation-track' }, [h('i', { style: 'width:' + Math.min(100, r.pct * 100) + '%' }),
-          r.target != null ? h('span', { class: 'target-marker', style: 'left:' + r.target * 100 + '%' }) : '']),
-        h('span', { class: 'small' }, [pct(r.pct) + ' / ' + (r.target == null ? '无目标' : pct(r.target))]),
+    w.appendChild(h('p', { class: 'sub' }, [c.snap.date + ' 盘点 · 当前 / 目标；不是实时配置']));
+    w.appendChild(h('div', { class: 'hint' }, ['组合 ¥' + money(c.sm.total) + ' · 组合外 ¥' + money(c.ext) + '（不参与配置）']));
+    c.sm.rows.slice(allocationPage * 4, allocationPage * 4 + 4).forEach(function (r) {
+      w.appendChild(h('section', { class: 'allocation-detail', style: '--c:' + Palette.color(r.category) }, [
+        h('div', { class: 'between' }, [h('b', {}, [h('i', { class: 'dot' }), r.category]), h('b', { class: 'amount' }, ['¥' + money(r.value)])]),
+        h('div', { class: 'bar' }, [h('i', { style: 'width:' + Math.min(100, r.pct * 100) + '%' })]),
+        h('div', { class: 'sub2' }, [pct(r.pct) + ' / ' + (r.target == null ? '无目标' : pct(r.target)) + (r.gap == null ? '' : ' · ' + (r.gap < 0 ? '超配 ' : '缺口 ') + money(Math.abs(r.gap)))]),
       ]));
     });
-    allocation.appendChild(h('div', { class: 'hint' }, ['当前 / 目标占比；竖线是目标。待对账交易未计入，不是实时配置。']));
-    w.appendChild(allocation);
-    w.appendChild(h('div', { class: 'hint footer-note' }, ['完整买卖记录起点：' + (Actions.since() || '尚未声明') + ' · 更早收益不猜算']));
+    if (c.sm.rows.length > 4) w.appendChild(Dom.pager(allocationPage, c.sm.rows.length, 4, function (p) { allocationPage = p; render(); Dom.toTop(); }));
   }
 
   /** 一行数字 —— 正负用颜色区分,分不出来的写「—」。 */
@@ -375,6 +373,7 @@ var NowUI = (function () {
     var ctx = { st: st, snaps: snaps, snap: snap, sm: sm, ext: ext,
                 extBlank: extBlank, age: age, stale: stale };
     if (view === 'home') { renderHome(w, ctx); el.appendChild(w); return; }
+    if (['allocation', 'notices', 'schedule'].indexOf(view) >= 0) { renderHomeDetail(w, ctx); el.appendChild(w); return; }
     if (view === 'half' || view === 'annual') { renderReview(w, ctx); el.appendChild(w); return; }
 
     w.appendChild(Dom.backBar('补仓与执行建议', function () { view = 'home'; render(); }));
@@ -402,51 +401,7 @@ var NowUI = (function () {
       w.appendChild(body); el.appendChild(w); return;
     }
 
-    // ---- 配置 ----
-    body.appendChild(h('h2', {}, ['配置']));
-    var lc = h('div', { class: 'list' });
-    sm.rows.sort(function (a, b) {
-      // 偏得最多的排前面 —— 这一页是用来「看哪儿不对」的,不是用来看排名的
-      var da = a.gap == null ? -1 : Math.abs(a.gap);
-      var db = b.gap == null ? -1 : Math.abs(b.gap);
-      return db - da;
-    }).forEach(function (r) {
-      var row = h('div', { class: 'list-row' });
-      // 类别色从 data/palette.js 来,行内设成 --c,条和点共用同一个值。
-      // ⚠️ 不在这里写死颜色 —— 写死的话深色模式跟不上,而且饼图那边会各写一套。
-      var b2 = h('div', { class: 'body', style: '--c:' + Palette.color(r.category) }, [
-        h('div', { class: 'ttl' }, [
-          h('i', { class: 'dot' }),
-          r.category + (r.unknown ? '(未分类)' : ''),
-        ]),
-      ]);
-      if (r.target != null) {
-        // 条的长度 = **相对目标的完成度**(12.4% / 20% = 62%),不是占总资产的比例。
-        // 后者在六个类别之间长度差得太小,一眼分不出谁欠得多 ——
-        // 而这一页存在的理由就是「一眼看出哪儿不对」。
-        //
-        // 超配的条子用暖色:同样是「满格」,一个是到位了、一个是溢出了,
-        // 光看长度分不出来 —— 而这两件事要采取的行动正好相反。
-        var over = r.gap < 0;
-        var fill = r.target > 0 ? Math.min(100, r.pct / r.target * 100) : 0;
-        b2.appendChild(h('div', { class: 'bar' + (over ? ' over' : '') },
-                        [h('i', { style: 'width:' + fill + '%' })]));
-        b2.appendChild(h('div', { class: 'sub2' }, [
-          pct(r.pct) + ' / ' + pct(r.target) +
-          (Math.abs(r.gap) > 500 ? ' · ' + (over ? '超 ' : '缺 ') + money(Math.abs(r.gap)) : ''),
-        ]));
-      } else {
-        b2.appendChild(h('div', { class: 'sub2' }, [
-          pct(r.pct) + ' · 不在目标比例里 —— 去设置补一条',
-        ]));
-      }
-      row.appendChild(b2);
-      row.appendChild(h('div', { class: 'amt' }, [
-        h('span', { class: 'u' }, ['¥']), money(r.value),
-      ]));
-      lc.appendChild(row);
-    });
-    body.appendChild(lc);
+    body.appendChild(Dom.menuRow('看当前配置', '占比、目标与缺口分开查看', function () { allocationFrom = 'plan'; view = 'allocation'; allocationPage = 0; render(); Dom.toTop(); }));
 
     // ---- 本期已记的买卖 ----
     //

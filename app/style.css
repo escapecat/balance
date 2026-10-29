@@ -924,3 +924,59 @@ button:focus-visible,summary:focus-visible,input:focus-visible,select:focus-visi
   .page input,.page select,.page textarea,.page .list-row input,.modal-sheet input,.modal-sheet select { font-size:16px; }
   .modal-sheet { max-height:90dvh; }
 }
+
+/* 分屏入口：高度由内容决定；小屏和放大字体仍可正常滚动，不裁掉内容。 */
+.screen-root { padding-top:var(--s3); padding-bottom:var(--s3); }
+.screen-heading { display:flex; align-items:center; justify-content:space-between; gap:var(--s2); }
+.menu-row { display:flex; align-items:center; justify-content:space-between; gap:var(--s3); width:100%; min-height:64px;
+  border:0; border-bottom:1px solid var(--border); background:transparent; color:var(--text); font:inherit; text-align:left; cursor:pointer; padding:var(--s3) 0; }
+.menu-row .body { min-width:0; }.menu-row b { display:block; font-size:var(--t-base); font-weight:600; }
+.menu-row small { display:block; color:var(--text-dim); font-size:var(--t-xs); margin-top:var(--s1); }
+.menu-chevron { color:var(--text-dim); font-size:var(--t-lg); flex:none; }
+.menu-row:hover { background:var(--surface-2); }
+.range-picker { display:flex; justify-content:space-between; align-items:center; gap:var(--s2); width:100%; min-height:var(--tap); padding:var(--s2) 0;
+  border:0; background:transparent; color:var(--text); font:inherit; font-size:var(--t-sm); text-align:left; cursor:pointer; }
+.range-picker>span:last-child { color:var(--text-dim); font-size:var(--t-xs); text-align:right; }
+.pager { display:flex; align-items:center; justify-content:space-between; gap:var(--s3); margin:var(--s3) 0 0; }
+.pager button,.month-grid button { min-height:var(--tap); padding:var(--s2) var(--s3); border:1px solid var(--border); border-radius:var(--r-sm);
+  background:var(--surface); color:var(--accent); font:inherit; font-size:var(--t-sm); cursor:pointer; }
+.pager button:disabled { opacity:.4; cursor:default; }.pager>span { font-size:var(--t-xs); color:var(--text-dim); }
+.action-tile { flex:1; min-width:0; min-height:96px; padding:var(--s3); border:1px solid var(--border); border-radius:var(--r-md);
+  background:var(--surface); color:var(--accent); font:inherit; text-align:left; cursor:pointer; }
+.action-tile.primary { background:var(--accent); color:var(--on-accent); border-color:var(--accent); }
+.action-tile .ui-icon { margin-bottom:var(--s2); width:20px; height:20px; }.action-tile b,.action-tile small { display:block; }
+.action-tile small { opacity:.8; font-size:var(--t-xs); margin-top:var(--s1); }
+.now-overview .hero { margin:var(--s3) 0; }.now-overview .hero-sub { margin-top:var(--s1); }
+.now-overview .hero-split { margin-top:var(--s2); padding-top:var(--s2); }
+.now-overview .metric-card { padding:var(--s2) var(--s3); }.now-overview .metric-card b { margin:0; font-size:22px; }
+.now-overview .home-actions { margin:var(--s3) 0 var(--s1); }.now-overview .menu-row { min-height:58px; padding:var(--s2) 0; }
+.status-strip { display:block; width:100%; min-height:var(--tap); border:0; border-radius:var(--r-sm); padding:var(--s2) var(--s3); margin-top:var(--s2);
+  background:var(--warn-dim); color:var(--warn); font:inherit; font-size:var(--t-xs); text-align:left; cursor:pointer; }
+.allocation-detail { padding:var(--s3) 0; border-bottom:1px solid var(--border); }.allocation-detail .sub2 { font-size:var(--t-xs); color:var(--text-dim); margin-top:var(--s2); }
+.stats-screen .profit-card { margin:var(--s2) 0 var(--s3); }.stats-screen .category-list { margin-top:var(--s2); }
+.stats-screen .category-row { min-height:72px; }.stats-screen .asset-chart { padding:var(--s3); margin:var(--s2) 0; }
+.stats-screen .asset-chart>.hint { font-size:var(--t-xs); line-height:1.5; }
+.stats-screen .asset-chart .button-pair { margin:var(--s2) 0 0; }.stats-screen .asset-chart .link { min-height:var(--tap); font-size:var(--t-xs); }
+.stats-trend>.menu-row { min-height:48px; padding:var(--s2) 0; }
+.history-screen .history-card { padding:var(--s3); margin:var(--s2) 0; }
+.history-screen .history-total { font-size:22px; margin:0; }.history-screen .history-breakdown { margin-top:var(--s1); }
+.history-screen .history-card .range-line { margin-bottom:var(--s1); }.history-screen .pending-label { margin-top:var(--s1); padding:var(--s1); }
+.history-screen .result-count { margin:var(--s1) 0 var(--s2); }.history-screen .history-flow { min-height:100px; }
+.history-screen .history-filter { border-bottom:1px solid var(--border); }
+.month-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:var(--s2); margin:var(--s3) 0; }
+.month-grid .active { background:var(--accent-dim); border-color:var(--accent); }.history-year { min-height:var(--tap); margin-top:var(--s3); font:inherit; color:var(--text); background:var(--surface); border:1px solid var(--border); border-radius:var(--r-sm); padding:var(--s2); }
+.settings-menu .menu-row { min-height:78px; }.settings-menu>.sub { margin-bottom:var(--s3); }
+.settings-detail>h2:first-child { margin-top:var(--s3); }.settings-detail .list-row { cursor:pointer; }
+.settings-strategy { margin:0; border:0; padding:0; }.settings-strategy>h2 { display:none; }
+.entry-step .entry-fields .list-row { flex-wrap:wrap; padding:var(--s4) 0; gap:var(--s2); }
+.entry-step .entry-fields .body { flex-basis:100%; }.entry-step .entry-fields input { flex:1; max-width:100%; min-height:var(--tap); }
+.entry-step-picker { border-bottom:1px solid var(--border); }.entry-step>.sub { margin-top:var(--s2); }
+.form-field { margin-bottom:var(--s4); }.form-field label { display:block; font-size:var(--t-sm); margin-bottom:var(--s1); }
+.form-field input,.form-field select { display:block; width:100%; min-height:var(--tap); border:1px solid var(--border); border-radius:var(--r-sm); padding:var(--s2);
+  background:var(--surface-2); color:var(--text); font:inherit; font-size:16px; }
+.form-field small { display:block; margin-top:var(--s1); }.fund-editor>.btn { margin-top:var(--s4); }
+@media(max-width:600px) {
+  .screen-root .hero-num { font-size:30px; }.screen-root .hero { padding:var(--s3) var(--s4); }
+  .screen-root .hero-split .v { font-size:var(--t-base); }.screen-root .hero-split { gap:var(--s3); }
+  .screen-root .hero-cap { font-size:var(--t-xs); }.stats-screen .asset-chart svg { max-height:180px; }
+}

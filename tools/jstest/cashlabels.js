@@ -1,6 +1,8 @@
 // Account names belong to balance entry, not a second set of purpose/settlement settings.
 var assert = require('assert/strict'), harness = require('./_dom'), seed = require('./_strategyseed');
 function text(n) { return (n.text || '') + n.children.map(text).join(''); }
+function all(n) { return [n].concat.apply([n], n.children.map(all)); }
+function click(root, label) { var n = all(root).filter(function (x) { return x.tagName === 'BUTTON' && text(x).indexOf(label) >= 0; })[0]; assert(n); n.handlers.click[0](); }
 var data = seed();
 data.snapshots[0].cash = { cash: 10000, instant_buffer: 20000, moneymarket: 30000 };
 data.settings.cashBuckets = { cash: { role: 'buffer', settleDays: 99 },
@@ -9,6 +11,7 @@ data.settings.cashBuckets = { cash: { role: 'buffer', settleDays: 99 },
 var c = harness.makeCtx(data), root = new harness.El('div');
 var before = JSON.stringify(c.Store.exportAll().data);
 c.SettingsUI.mount(root, {});
+click(root, '现金保留');
 assert(!/现金用途|到账等待|instant_buffer|moneymarket|\bcash\b|日日宝|月月宝/.test(text(root)));
 assert(text(root).includes('现金保底'));
 var settings = c.Config.get(), snap = c.Ledger.latest(c.Store.get('snapshots'));
@@ -22,6 +25,7 @@ assert.equal(c.Portfolio.bucketOf, undefined);
 assert.equal(c.Portfolio.liquidNow, undefined);
 assert.equal(c.Portfolio.pending, undefined);
 c.EntryUI.mount(root, {});
+while (!text(root).includes('日日宝')) click(root, '下一步');
 ['现金账户', '日日宝', '月月宝'].forEach(function (name) { assert(text(root).includes(name)); });
 assert(!/\bcash\b|instant_buffer|moneymarket/.test(text(root)));
 c.HistoryUI.mount(root, {});

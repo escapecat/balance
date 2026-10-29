@@ -11,8 +11,17 @@
 var SettingsUI = (function () {
 
   var el, onChanged = null;
-  var sub = null;          // null | 'data' —— 二级屏
-  var openSections = {};
+  var sub = null;          // 菜单与独立子页；浏览状态不写入账本。
+  var sectionPage = 0;
+  function go(next) { sub = next; sectionPage = 0; render(); Dom.toTop(); }
+  function pageList(list, size) {
+    var rows = Array.prototype.slice.call(list.children), count = rows.length;
+    sectionPage = Math.max(0, Math.min(sectionPage, Math.ceil(count / size) - 1));
+    rows.forEach(function (row, i) { if (i < sectionPage * size || i >= (sectionPage + 1) * size) list.removeChild(row); });
+    var box = h('div', {}, [list]);
+    if (count > size) box.appendChild(Dom.pager(sectionPage, count, size, function (p) { sectionPage = p; render(); Dom.toTop(); }));
+    return box;
+  }
 
 
   function h(tag, attrs, kids) {
@@ -42,28 +51,36 @@ var SettingsUI = (function () {
   var lastView = null;   // 换了一屏才回顶部，重渲染不动
 
   function render() {
-    if (lastView === 'null' && typeof el.querySelectorAll === 'function') {
-      var groups = el.querySelectorAll('details[data-section]');
-      if (groups.length) { openSections = {}; Array.prototype.forEach.call(groups, function (n) { if (n.open) openSections[n.getAttribute('data-section')] = true; }); }
-    }
     el.innerHTML = '';
     // 换了一屏就回到顶部。⚠️ 只在**视图真的变了**时做 ——
     // 每次 render 都做的话，勾一条待办都会把你弹回顶部。
     var vNow = String(sub);
     if (vNow !== lastView) { lastView = vNow; Dom.toTop(); }
     if (sub === 'data') { dataScreen(); return; }
+    if (!sub) {
+      var menu = h('div', { class: 'wrap screen-root settings-menu' }, [h('h1', {}, ['设置']), h('p', { class: 'sub' }, ['按需要进入，不必逐项往下找'])]);
+      var codes = {}, missing = {};
+      Config.allKnown().forEach(function (f) { codes[f.code] = true; });
+      (Store.get('snapshots', []) || []).forEach(function (sn) { Object.keys(sn.holdings || {}).forEach(function (code) { if (!codes[code]) missing[code] = true; }); });
+      [['strategy', '策略与检查', '日常只买不卖 · 年度 / 半年检查'], ['targets', '目标配置', '类别与现金比例'],
+        ['cash', '现金保留', '统一保底与补仓门槛'], ['funds', '基金与限额', '申购状态、额度与买入通道'], ['data', '数据与备份', '同步、导出、回滚与组合外资产']].forEach(function (item) {
+        menu.appendChild(Dom.menuRow(item[1], item[2] + (item[0] === 'funds' && Object.keys(missing).length ? ' · ' + Object.keys(missing).length + ' 只未分类' : ''), function () { go(item[0]); }));
+      });
+      el.appendChild(menu); return;
+    }
     var w = h('div', { class: 'wrap' });
     var s = st();
     var snaps = Store.get('snapshots', []) || [];
     var snap = Ledger.latest(snaps);
     var sm = snap ? Portfolio.summarize(snap, s) : null;
 
-    w.appendChild(h('h1', {}, ['设置']));
+    var titles = { strategy: '策略与检查', targets: '目标配置', cash: '现金保留', funds: '基金与限额', assets: '组合外资产', channels: '买入通道', empty: '已清仓基金' };
+    w.appendChild(Dom.backBar(titles[sub] || '设置', function () { go(sub === 'assets' ? 'data' : sub === 'channels' || sub === 'empty' ? 'funds' : null); }));
     var rawSettings = Store.get('settings', {}) || {};
     var emptyEntries = ['funds', 'retired'].reduce(function (n, key) {
       return n + (Array.isArray(rawSettings[key]) ? rawSettings[key].filter(function (f) { return !f; }).length : 0);
     }, 0);
-    if (emptyEntries) w.appendChild(h('div', { class: 'note' }, [
+    if (emptyEntries && sub === 'funds') w.appendChild(h('div', { class: 'note' }, [
       '旧配置中有 ' + emptyEntries + ' 条空基金记录，显示时已忽略；历史金额和交易未改动。下次保存基金配置时会清理空项。',
     ]));
 
@@ -83,7 +100,7 @@ var SettingsUI = (function () {
       });
     });
     var orphans = Object.keys(orphanAt);
-    if (orphans.length) {
+    if (orphans.length && sub === 'funds') {
       w.appendChild(h('h2', {}, ['未分类 · ' + orphans.length + ' 只']));
       w.appendChild(h('div', { class: 'hint', style: 'margin-bottom:8px' }, [
         '这几只不在基金清单里,**不参与再平衡**,但钱算在总额里 —— 补一条就好。',
@@ -190,7 +207,7 @@ var SettingsUI = (function () {
     tl.appendChild(targetRow('现金', s.cashTarget || 0, function (v) {
       saveTargets(null, v);
     }));
-    w.appendChild(tl);
+    w.appendChild(sub === 'targets' ? pageList(tl, 4) : tl);
 
     // ⚠️ 加起来不是 100% 要**当场说清差多少、以及后果**。
     //    差几个点的话所有缺口都是错的,而错法很隐蔽:
@@ -285,11 +302,16 @@ var SettingsUI = (function () {
         h('span', { class: 'chev' }),
       ]));
     });
-    w.appendChild(fl);
+    w.appendChild(sub === 'funds' ? pageList(fl, 4) : fl);
     w.appendChild(h('button', {
       class: 'btn ghost', style: 'margin-top:8px',
       onclick: function () { editFund({}, true); },
     }, ['＋ 加一只基金']));
+    w.appendChild(Dom.menuRow('买入通道', '每类选择一只基金，不因限购自动换基金', function () { go('channels'); }));
+    if (empty.length) w.appendChild(Dom.menuRow('已清仓基金', empty.length + ' 只 · 编辑或移除', function () { go('empty'); }));
+    var fundSection = w;
+    var channelSection = h('section', { class: 'settings-detail' });
+    w = channelSection;
     Object.keys(s.targets || {}).forEach(function (cat) {
       var selected = mainOf[cat], fund = funds.filter(function (f) { return f.code === selected; })[0];
       w.appendChild(h('button', { class: 'settings-route', onclick: function () {
@@ -299,6 +321,8 @@ var SettingsUI = (function () {
       } }, [cat + ' 买入通道', h('span', {}, [(fund ? fund.name || fund.code : '待选择') + ' ›'])]));
     });
 
+    var emptySection = h('section', { class: 'settings-detail' });
+    w = emptySection;
     if (empty.length) {
       w.appendChild(h('h2', {}, ['已清仓', h('span', { class: 'n' }, [empty.length + ' 只'])]));
       w.appendChild(h('div', { class: 'hint', style: 'margin-bottom:8px' }, [
@@ -317,11 +341,13 @@ var SettingsUI = (function () {
           h('span', { class: 'chev' }),
         ]));
       });
-      w.appendChild(el0);
+      w.appendChild(sub === 'empty' ? pageList(el0, 4) : el0);
     }
 
     // ---- 现金 ----
-    sections.funds = w;
+    sections.funds = fundSection;
+    sections.channels = channelSection;
+    sections.empty = emptySection;
     w = settingGroup('03', '现金保护', '统一现金保底与目标比例，不按账户区分');
     // ⚠️ 现金的**目标占比在上面「目标比例」里**(它是第七个类别)。
     //    这里只设统一底线与补仓门槛，不再给每个账户配置用途或到账天数。
@@ -383,13 +409,8 @@ var SettingsUI = (function () {
     // ---- 数据与备份 ----
     sections.assets = w;
     w = root;
-    w.appendChild(strategySettings(s));
-    w.appendChild(sections.targets);
-    w.appendChild(sections.cash);
-    w.appendChild(sections.funds);
-    var dataGroup = settingGroup('05', '数据与同步', '备份、同步、历史完整性与组合外资产');
-    root.appendChild(dataGroup); w = dataGroup;
-    w.appendChild(sections.assets);
+    sections.strategy = strategySettings(s);
+    w.appendChild(sections[sub]);
     //
     // ⚠️ 版本号、导出导入、回滚点、买卖记录起点 —— 这四样**都是低频的**，
     //    有的一年用一次，有的一次都不用。可它们原先各占一个板块摊在一级页上，
@@ -400,23 +421,11 @@ var SettingsUI = (function () {
     //    所以低频的收进一个子屏。⚠️ **不是折叠**：折叠起来的东西
     //    仍然占着一行标题和一次判断（「这个要不要点开」），
     //    而这几样根本不该出现在你要改现金保底的时候。
-    w.appendChild(h('div', { class: 'list', style: 'margin-top:24px' }, [
-      h('div', { class: 'list-row', onclick: function () { sub = 'data'; render(); } }, [
-        h('div', { class: 'body' }, [
-          h('div', { class: 'ttl' }, ['数据与备份']),
-          h('div', { class: 'sub2' }, ['导出导入 · 回滚 · 版本号']),
-        ]),
-        h('span', { class: 'chev' }),
-      ]),
-    ]));
-
     el.appendChild(root);
   }
 
   function settingGroup(n, title, detail) {
-    return h('details', { class: 'settings-section', 'data-section': title, open: openSections[title] ? '' : null }, [h('summary', {}, [
-      h('span', { class: 'settings-number' }, [n]), h('span', {}, [h('b', {}, [title]), h('small', {}, [detail])]),
-    ])]);
+    return h('section', { class: 'settings-detail', 'data-section': title });
   }
   function strategySettings(s) {
     var p = Strategy.policy(s), sc = Strategy.schedule(s, Trading.today());
@@ -628,7 +637,8 @@ var SettingsUI = (function () {
   /** 二级屏:数据与备份。低频操作全在这儿。 */
   function dataScreen() {
     var w = h('div', { class: 'wrap' });
-    w.appendChild(Dom.backBar('数据与备份', function () { sub = null; render(); }));
+    w.appendChild(Dom.backBar('数据与备份', function () { go(null); }));
+    w.appendChild(Dom.menuRow('组合外资产', '编辑名称与分类，金额在录入余额时填写', function () { go('assets'); }));
 
     // ---- 同步 ----
     //
@@ -875,21 +885,46 @@ var SettingsUI = (function () {
     });
   }
 
-  /** 加 / 改一只基金 —— **一屏问完,不做多步菜单。**
-   *
-   *  ⚠️ 早先这里是个菜单:改名字点一次、改类别再点一次、改代码又一次。
-   *     要改三项就得进出三轮,而每轮之间还得重新找到这只基金。
-   *     录入页早就坚持「一屏滚完不做逐个问答」了,这里却做反了。
-   *
-   *  基金身份与交易限制分别保存：持仓大不代表今天可买。
-   */
-  /** 改一只基金 —— **弹窗,不是整页**。
-   *
-   *  ⚠️ 早先是整屏接管的表单。三个字段而已,却要离开设置页、
-   *     改完再退回来,滚动位置还得自己找 —— 和旁边「目标比例」
-   *     点一行就地改完的体验完全是两套。
-   *     一个页面里两种交互模式,每次都得先想「这个是点开还是跳走」。
-   */
+  // 一份未提交表单分成额度、身份、选填三屏；返回不丢输入，只有保存才写配置。
+  function fundForm(opts, isNew) {
+    var position = Dom.scrollPosition(), values = Object.assign({}, opts.values), mode = isNew ? 'identity' : 'main', error = '';
+    return new Promise(function (resolve) {
+      function finish(value) { render(); Dom.restoreScroll(position); resolve(value); }
+      function draw() {
+        var title = mode === 'optional' ? '更多选项（选填）' : mode === 'identity' ? '基金基本信息' : opts.title;
+        var w = h('div', { class: 'wrap fund-editor' }, [Dom.backBar(title, function () { if (mode === 'main') finish(null); else { mode = 'main'; draw(); } })]);
+        if (mode === 'main') w.appendChild(h('p', { class: 'sub' }, [opts.hint]));
+        var list = h('div', { class: 'form-fields' });
+        opts.fields.filter(function (field) { return mode === 'optional' ? field.advanced : mode === 'identity' ? ['code', 'name', 'category'].indexOf(field.key) >= 0 : ['status', 'limit'].indexOf(field.key) >= 0; }).forEach(function (field) {
+          var id = 'fund-' + field.key, attrs = { id: id, value: values[field.key] == null ? '' : values[field.key],
+            oninput: function (e) { values[field.key] = e.target.value; }, onchange: function (e) { values[field.key] = e.target.value; } };
+          var input;
+          if (field.type === 'select') {
+            var options = field.options.slice();
+            if (!options.some(function (item) { return item.key === String(values[field.key]); })) { values[field.key] = ''; options.unshift({ key: '', label: '请选择' }); }
+            input = h('select', attrs, options.map(function (item) { return h('option', { value: item.key, selected: String(values[field.key]) === item.key ? '' : null }, [item.label]); }));
+          }
+          else { attrs.type = field.type || 'text'; attrs.inputmode = field.mode || (field.type === 'number' ? 'decimal' : null); input = h('input', attrs); }
+          list.appendChild(h('div', { class: 'form-field' }, [h('label', { for: id }, [field.label]), input, field.hint ? h('small', { class: 'hint' }, [field.hint]) : '']));
+        });
+        w.appendChild(list);
+        if (mode === 'main') {
+          w.appendChild(Dom.menuRow('基金基本信息', [values.code, values.name, values.category].filter(Boolean).join(' · ') || '待填写', function () { mode = 'identity'; draw(); }));
+          w.appendChild(Dom.menuRow('更多选项（选填）', '平台、核实日期、其他订单用额', function () { mode = 'optional'; draw(); }));
+        }
+        if (error) w.appendChild(h('div', { class: 'note warn', role: 'alert' }, [error]));
+        w.appendChild(h('button', { class: 'btn', onclick: function () {
+          if (mode !== 'main') { mode = 'main'; error = ''; draw(); return; }
+          error = opts.validate(values) || '';
+          if (error) { draw(); return; }
+          finish(values);
+        } }, [mode === 'main' ? '保存' : '完成']));
+        if (mode === 'main' && opts.extra) w.appendChild(h('button', { class: 'link danger', onclick: function () { opts.extra.onClick(finish); } }, [opts.extra.label]));
+        el.innerHTML = ''; el.appendChild(w); Dom.toTop();
+      }
+      draw();
+    });
+  }
   function editFund(f, isNew) {
     var s = st();
     var cats = Object.keys(s.targets || {});
@@ -900,7 +935,7 @@ var SettingsUI = (function () {
     }
     var oldCode = isNew ? null : f.code;
     var t = Trading.of(f), date = Trading.today();
-    Modal.form({
+    fundForm({
       title: isNew ? '加一只基金' : (f.name || f.code),
       hint: '按申购状态和限额生成建议，规则变化时再更新；平台、日期选填，不用每天重填。',
       fields: [
@@ -934,7 +969,7 @@ var SettingsUI = (function () {
           dropEmpty({ code: oldCode, name: f.name, category: f.category });
         },
       },
-    }).then(function (v) {
+    }, isNew).then(function (v) {
       if (!v) return;
       var payload = { code: String(v.code).trim(),
                       name: (v.name || '').trim() || String(v.code).trim(),
@@ -948,9 +983,6 @@ var SettingsUI = (function () {
       render();
     });
   }
-
-  // ⚠️ fundForm() / saveFund() 已删 —— 那是整页表单那一版的东西。
-  //    留着的话下次会有人以为基金编辑还有两条路径。
 
   /** 改一项组合外资产(MSFT、房产…)—— 名字和类别。
    *
@@ -1124,6 +1156,7 @@ var SettingsUI = (function () {
     el = node;
     onChanged = (opts || {}).onChanged;
     sub = null;      // 每次挂载都回一级页 —— 切走再切回来还停在子屏会莫名其妙
+    sectionPage = 0;
     render();
   }
 

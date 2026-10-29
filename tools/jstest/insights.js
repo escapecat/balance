@@ -57,14 +57,16 @@ near(cc.rows.filter(function (r) { return r.category === '未分类'; })[0].mark
 var original = clone(c.Store.exportAll().data), page = new El('div');
 snaps.forEach(function (s) {
   c.HistoryUI.mount(page);
+  click(page, '月份 / 查找');
+  var input = page.querySelector('#history-search'); input.handlers.input[0]({ target: { value: s.date } });
+  click(page, '查看结果');
   click(page, s.date + ' 盘点');
   assert(text(page).indexOf('当期总资产') >= 0);
   assert(text(page).indexOf('暂时无法') < 0);
 });
-c.StatsUI.mount(page); click(page, '本期');
+c.StatsUI.mount(page); click(page, '完整记录'); click(page, '本期');
 assert(text(page).indexOf('2026-09-28 — 2026-10-29') >= 0);
-click(page, '查看各类区间盈亏');
-assert(text(page).indexOf('各类区间盈亏') >= 0); click(page, '股');
+click(page, '类别'); click(page, '股');
 assert(text(page).indexOf('＝ 期末市值') >= 0);
 assert.deepStrictEqual(clone(c.Store.exportAll().data), original, '查历史、切区间、展开类别均不能写账');
 
@@ -73,14 +75,17 @@ var many = seed(); many.snapshots = []; many.flows = []; many.prefs.actionsSince
 for (var i = 0; i < 120; i++) many.snapshots.push({ date: (2017 + Math.floor(i / 12)) + '-' + String(i % 12 + 1).padStart(2, '0') + '-01',
   holdings: { A: 100000 + i, B: 50000 }, cash: { c: 50000 }, actionIds: [] });
 var m = harness.makeCtx(many); m.HistoryUI.mount(page);
-assert.equal(all(page).filter(function (n) { return n.className === 'history-card'; }).length, 20);
-click(page, '再显示 20 条');
-assert.equal(all(page).filter(function (n) { return n.className === 'history-card'; }).length, 40);
+assert.equal(all(page).filter(function (n) { return n.className === 'history-card'; }).length, 3);
+click(page, '下一页');
+assert.equal(all(page).filter(function (n) { return n.className === 'history-card'; }).length, 3);
+assert(text(page).includes('2 / 40'));
+click(page, '月份 / 查找');
 var search = page.querySelector('#history-search');
 search.handlers.input[0]({ target: { value: '2025-03' } });
-assert.equal(all(page).filter(function (n) { return n.className === 'history-card'; }).length, 1);
 assert.strictEqual(page.querySelector('#history-search'), search, '搜索不能重建输入框');
-m.StatsUI.mount(page); click(page, '完整记录'); click(page, '更早的盘点');
+click(page, '查看结果');
+assert.equal(all(page).filter(function (n) { return n.className === 'history-card'; }).length, 1);
+m.StatsUI.mount(page); click(page, '完整记录'); click(page, '完整记录'); click(page, '走势'); click(page, '更早的盘点');
 assert(text(page).indexOf('较新的盘点') >= 0);
 
 // 基金增删同样容忍旧 null，而不是只有历史详情单点防御。

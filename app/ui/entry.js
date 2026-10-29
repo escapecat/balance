@@ -1,7 +1,5 @@
-// 录入 —— **一屏滚完,不做逐个问答。**
-//
-// ⚠️ 逐个问答的形态本身就是错的:抄到第 7 个想回头核对第 3 个,问答式做不到。
-//    而这些数字是你从基金 app 里一个一个看出来抄过来的,来回核对是常态。
+// 录入 —— 每屏最多三项，共用一份草稿，最后统一对账和提交。
+// 可随时跳回任一步核对；翻页从不提交快照，留空仍然沿用上期。
 //
 // ⚠️ **留空 ≠ 0**,这是这一页的地基:
 //      留空 = 这项我没抄,沿用上次
@@ -16,6 +14,7 @@
 var EntryUI = (function () {
 
   var el, draft = null, onDone = null, footerHost = null;
+  var step = 0, footerNode = null;
   // 底部对账区的当前节点 + 它依赖的上一期 —— 输入时要就地换掉它
   var sumBox = null, sumPrev = null;
 
@@ -81,6 +80,7 @@ var EntryUI = (function () {
         //    而那块是这一页存在的理由(抄完当场核对)。不动等于没有。
         //    整页 render() 不行:输入框会重建,焦点和光标位置全丢。
         refreshSummary();
+        saveDraft();
       },
       onblur: saveDraft,
       style: 'width:7.5em;text-align:right',
@@ -93,47 +93,26 @@ var EntryUI = (function () {
 
   function render() {
     el.innerHTML = '';
+    if (footerNode && footerNode.parentNode) footerNode.parentNode.removeChild(footerNode);
+    sumBox = null;
     var w = h('div', { class: 'wrap' });
     var st = settings();
     var snaps = snapshots();
     var prev = Ledger.latest(snaps) || { holdings: {}, cash: {}, external: {} };
     var funds = (st.funds || []);
 
-    var filled = 0, total = 0;
-    function count(bag, keys) {
-      keys.forEach(function (k) {
-        total++;
-        if (!Ledger.isEmpty(bag[k])) filled++;
-      });
+    var steps = [], filled = 0, total = 0;
+    function group(title, rows) {
+      rows.forEach(function (row) { total++; if (!Ledger.isEmpty(row.bag[row.key])) filled++; });
+      for (var i = 0; i < rows.length; i += 3) steps.push({ title: title, rows: rows.slice(i, i + 3) });
     }
-    count(draft.holdings, funds.map(function (f) { return f.code; }));
-    count(draft.cash, Object.keys(prev.cash || {}));
-
-    w.appendChild(Dom.backBar('录入 ' + draft.date.slice(0, 7), function () { saveDraft(); if (onDone) onDone(false); }));
-    w.appendChild(h('p', { class: 'sub' }, [
-      '留空 = 沿用上次。已填 ' + filled + ' / ' + total,
-    ]));
-
-    // ⚠️ 交叉校验:基金 app 里那个总数你本来就看得到,填一下,
-    //    漏抄一只 / 抄串一行 / 少打一位 全都当场暴露。
-    //    这一条比后面任何异常检测都管用,而成本几乎为零。
-    w.appendChild(h('div', { class: 'list', style: 'margin-bottom:16px' }, [
-      numRow('基金 app 显示的总市值', '可选。填了能当场查出抄错', draft, 'declared', null),
-    ]));
-
-    // 按类别分组 —— 和你在基金 app 里看到的顺序对上,能省一半眼睛
+    // 按类别组织三项一组，而非每项一个问答；金额只存在 draft 中。
     var byCat = {};
     funds.forEach(function (f) {
       (byCat[f.category] = byCat[f.category] || []).push(f);
     });
     Object.keys(byCat).forEach(function (cat) {
-      w.appendChild(h('div', { class: 'sec-h' }, [cat]));
-      var list = h('div', { class: 'list' });
-      byCat[cat].forEach(function (f) {
-        list.appendChild(numRow(f.name || f.code, f.code, draft.holdings, f.code,
-                                prev.holdings[f.code]));
-      });
-      w.appendChild(list);
+      group(cat, byCat[cat].map(function (f) { return { label: f.name || f.code, sub: f.code, bag: draft.holdings, key: f.code, prev: prev.holdings[f.code] }; }));
     });
 
     // 未分类的也要露出来 —— 有钱在这儿说明基金清单缺一条,
@@ -142,62 +121,48 @@ var EntryUI = (function () {
       return !funds.some(function (f) { return f.code === c; });
     });
     if (unknown.length) {
-      w.appendChild(h('div', { class: 'sec-h' }, ['未分类']));
-      w.appendChild(h('div', { class: 'hint', style: 'margin-bottom:8px' }, [
-        '这几只不在基金清单里,不会参与再平衡 —— 去「设置」补一条就好',
-      ]));
-      var ul = h('div', { class: 'list' });
-      unknown.forEach(function (c) {
-        ul.appendChild(numRow(c, '未分类', draft.holdings, c, prev.holdings[c]));
-      });
-      w.appendChild(ul);
+      group('未分类', unknown.map(function (c) { return { label: c, sub: '不参与补仓，去设置归类', bag: draft.holdings, key: c, prev: prev.holdings[c] }; }));
     }
 
-    w.appendChild(h('div', { class: 'sec-h' }, ['现金']));
-    var cl = h('div', { class: 'list' });
-    Object.keys(prev.cash || {}).forEach(function (k) {
-      cl.appendChild(numRow(Labels.cash(k), null, draft.cash, k, prev.cash[k]));
-    });
-    w.appendChild(cl);
-
+    group('现金', Object.keys(prev.cash || {}).map(function (k) { return { label: Labels.cash(k), bag: draft.cash, key: k, prev: prev.cash[k] }; }));
     var ext = Assets.all();
     if (ext.length) {
-      w.appendChild(h('div', { class: 'sec-h' }, ['组合之外']));
-      var el2 = h('div', { class: 'list' });
-      ext.forEach(function (a) {
-        // 上次的值来自上一期快照,不是资产条目自己 —— 金额只有一处出处
-        el2.appendChild(numRow(a.name, Labels.kind(a.kind), draft.external, a.id,
-                               Assets.valueAt(prev, a.id)));
-      });
-      w.appendChild(el2);
+      group('组合之外', ext.map(function (a) { return { label: a.name, sub: Labels.kind(a.kind), bag: draft.external, key: a.id, prev: Assets.valueAt(prev, a.id) }; }));
     }
-
-    // ⚠️ 这里**没有「本期净投入」输入框**,而且不该有。
-    //
-    //    原来是有的:你得自己算「这个月转进去多少」填进来,填错了收益率就错。
-    //    现在它是**解出来的**:
-    //        现金变化 = 外部净流入 − 净买入 + 分红
-    //    净买入和分红来自你记的动作,现金变化是这一页抄的,
-    //    于是「工资 − 花费」自己就出来了。少一个框,少一处会填错的地方。
-    //
-    //    下面这块顺便把解出来的数当场显示 —— **抄完就能核对**,
-    //    离谱的话多半是漏记了一笔买卖,而不是你真的花了那么多。
-    sumPrev = prev;
-    sumBox = summary(prev);
-    w.appendChild(sumBox);
-
+    steps.push({ title: '核对并保存', rows: [] });
+    step = Math.max(0, Math.min(step, steps.length - 1));
+    function move(next) { saveDraft(); step = next; render(); Dom.toTop(); }
+    function cancel() { saveDraft(); if (onDone) onDone(false); }
+    w.className = 'wrap entry-step';
+    w.appendChild(Dom.backBar('录入余额', function () { if (step > 0) move(step - 1); else cancel(); }));
+    w.appendChild(h('button', { class: 'range-picker entry-step-picker', onclick: function () {
+      saveDraft();
+      Modal.pick({ title: '跳到哪一步核对', options: steps.map(function (s, i) { return { key: String(i), label: (i + 1) + ' · ' + s.title,
+        hint: s.rows.map(function (r) { return r.label; }).join('、') }; }) }).then(function (n) { if (n != null) move(Number(n)); });
+    } }, [(step + 1) + ' / ' + steps.length + ' · ' + steps[step].title, h('span', {}, ['跳转 ›'])]));
+    w.appendChild(h('p', { class: 'sub' }, [draft.date + ' · 已填 ' + filled + ' / ' + total + ' · 留空沿用，0 表示清空']));
+    if (step < steps.length - 1) {
+      var list = h('div', { class: 'list entry-fields' });
+      steps[step].rows.forEach(function (row) { list.appendChild(numRow(row.label, row.sub, row.bag, row.key, row.prev)); });
+      w.appendChild(list);
+      w.appendChild(h('div', { class: 'hint footer-note' }, ['草稿自动保留，可随时跳回核对；只在最后一步保存完整盘点。']));
+    } else {
+      w.appendChild(h('div', { class: 'list' }, [numRow('基金 app 总市值（选填）', '用于交叉核对，不含现金和组合外', draft, 'declared', null)]));
+      sumPrev = prev; sumBox = summary(prev); w.appendChild(sumBox);
+    }
     var actions = h('div', { class: 'entry-actions' });
     actions.appendChild(h('button', {
-      class: 'btn', style: 'margin-top:16px', onclick: submit,
-    }, ['保存这一期']));
+      class: 'btn', onclick: step === steps.length - 1 ? submit : function () { move(step + 1); },
+    }, [step === steps.length - 1 ? '保存这一期' : '下一步']));
     actions.appendChild(h('button', {
       class: 'link', style: 'margin-top:8px',
-      onclick: function () { if (onDone) onDone(false); },
-    }, ['先不存,回去']));
+      onclick: cancel,
+    }, ['稍后继续']));
     if (!footerHost) w.appendChild(actions);
 
     el.appendChild(w);
     if (footerHost) footerHost.appendChild(actions);
+    footerNode = actions;
   }
 
   /** 就地换掉底部对账区。**不重建输入框** —— 那会丢焦点和光标位置。 */
@@ -433,6 +398,7 @@ var EntryUI = (function () {
     el = node;
     onDone = (opts || {}).onDone;
     footerHost = (opts || {}).footerHost || null;
+    step = 0;
     draft = Ledger.loadDraft() || { date: today(), holdings: {}, cash: {},
                                     external: {}, netInflow: '', declared: '' };
     // ⚠️ 草稿的日期**过期了就换成今天**,不是只在为空时才补。

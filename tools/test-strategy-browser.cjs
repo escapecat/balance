@@ -16,18 +16,21 @@ async function main() {
   const shot = name => page.screenshot({ path: path.join(artifacts, engine + '-' + name + '.png'), animations: 'disabled' });
   const dialog = () => page.locator('.modal-mask:not(.closing)');
   const closeWait = () => page.locator('.modal-mask').waitFor({ state: 'detached' });
-  const planView = async () => { await tab(page, '现在'); await page.getByRole('button', { name: /这个月该做什么/ }).click(); };
+  const planView = async () => { await tab(page, '现在'); await page.getByRole('button', { name: /新钱补仓/ }).click(); };
+  const editor = () => page.locator('.fund-editor');
+  const saveFund = async () => { await editor().getByRole('button', { name: '保存', exact: true }).click(); await editor().waitFor({ state: 'detached' }); };
+  const review = async name => { await page.getByRole('button', { name: /年度检查待处理|半年检查待处理|下次年度检查/ }).click(); await page.getByRole('button', { name, exact: true }).click(); };
   async function openSection(title) {
-    const section = page.locator('.settings-section').filter({ has: page.locator('summary').filter({ hasText: title }) }).first();
-    if (await section.getAttribute('open') === null) await section.locator(':scope > summary').click();
+    const names = { '基金与交易限制': '基金与限额', '现金保护': '现金保留' };
+    await page.locator('.settings-menu .menu-row').filter({ hasText: names[title] || title }).click();
   }
   async function editFund(status, cap) {
     await tab(page, '设置');
     await openSection('基金与交易限制');
-    await page.locator('.settings-section .list-row').filter({ hasText: '111111' }).click();
-    await dialog().getByLabel('申购状态', { exact: true }).selectOption(status);
-    if (cap !== undefined) await dialog().getByLabel('每日总限额', { exact: true }).fill(String(cap));
-    await dialog().getByRole('button', { name: '保存', exact: true }).click(); await closeWait();
+    await page.locator('.settings-detail .list-row').filter({ hasText: '111111' }).click();
+    await editor().getByLabel('申购状态', { exact: true }).selectOption(status);
+    if (cap !== undefined) await editor().getByLabel('每日总限额', { exact: true }).fill(String(cap));
+    await saveFund();
   }
   try {
     await page.goto(remote || local.url); await page.waitForFunction(() => typeof Strategy !== 'undefined');
@@ -40,14 +43,14 @@ async function main() {
     assert.equal(await page.evaluate(() => Store.get('todos').length), 2);
     await shot('limited-buy');
     await tab(page, '设置'); await shot('settings');
-    for (const title of ['目标配置', '现金保护', '基金与交易限制', '数据与同步']) assert.equal(await page.locator('summary').filter({ hasText: title }).count(), 1);
+    for (const title of ['策略与检查', '目标配置', '现金保留', '基金与限额', '数据与备份']) assert.equal(await page.locator('.settings-menu .menu-row').filter({ hasText: title }).count(), 1);
     await openSection('基金与交易限制');
-    await page.locator('.settings-section .list-row').filter({ hasText: '111111' }).click();
+    await page.locator('.settings-detail .list-row').filter({ hasText: '111111' }).click();
     await shot('limit-editor');
-    await dialog().getByLabel('每日总限额', { exact: true }).fill('-1');
-    await dialog().getByRole('button', { name: '保存', exact: true }).click();
-    assert.match(await dialog().textContent(), /非负/);
-    await dialog().getByRole('button', { name: '取消', exact: true }).click(); await closeWait();
+    await editor().getByLabel('每日总限额', { exact: true }).fill('-1');
+    await editor().getByRole('button', { name: '保存', exact: true }).click();
+    assert.match(await editor().textContent(), /非负/);
+    await editor().getByRole('button', { name: '返回', exact: true }).click();
     for (const [status, cap, total] of [['paused', undefined, 4000], ['unknown', undefined, 4000], ['limited', 0, 4000], ['open', undefined, 20000], ['limited', 100, 4100]]) {
       await editFund(status, cap); await planView();
       const actual = await page.locator('.strategy-amount').textContent();
@@ -85,36 +88,38 @@ async function main() {
     assert.equal(await page.locator('.settings-route').filter({ hasText: /现金账户|日日宝|月月宝/ }).count(), 0);
     assert.equal(await page.evaluate(() => JSON.stringify(Config.get().cashBuckets)), JSON.stringify(labeled.settings.cashBuckets));
     await shot('cash-simplified');
-    await tab(page, '现在'); await page.getByRole('button', { name: '录入最新余额', exact: true }).click();
+    await tab(page, '现在'); await page.getByRole('button', { name: /录入余额/ }).click();
+    while (!await page.getByText('日日宝', { exact: true }).count()) await page.getByRole('button', { name: '下一步', exact: true }).click();
     for (const name of ['现金账户', '日日宝', '月月宝']) await page.getByText(name, { exact: true }).waitFor();
     assert.doesNotMatch(await page.locator('.page').textContent(), /instant_buffer|moneymarket|\bcash\b/);
     assert.equal(await page.evaluate(() => JSON.stringify(Store.get('snapshots'))), JSON.stringify(labeled.snapshots));
-    await page.getByRole('button', { name: '先不存,回去', exact: true }).click();
+    await page.getByRole('button', { name: '稍后继续', exact: true }).click();
     // Metadata is optional in the real form and remains optional after reload/import.
     await putSeed(page, seed(date), 4); await tab(page, '设置');
     await openSection('基金与交易限制');
-    await page.locator('.settings-section .list-row').filter({ hasText: '111111' }).click();
-    await dialog().locator('.form-advanced summary').click();
-    await dialog().getByLabel('购买平台（选填）', { exact: true }).fill('');
-    await dialog().getByLabel('核实日期（选填）', { exact: true }).fill('');
-    await dialog().getByLabel('今日其他订单已用额度（选填）', { exact: true }).fill('');
-    await dialog().getByRole('button', { name: '保存', exact: true }).click(); await closeWait();
+    await page.locator('.settings-detail .list-row').filter({ hasText: '111111' }).click();
+    await editor().getByRole('button', { name: /更多选项/ }).click();
+    await editor().getByLabel('购买平台（选填）', { exact: true }).fill('');
+    await editor().getByLabel('核实日期（选填）', { exact: true }).fill('');
+    await editor().getByLabel('今日其他订单已用额度（选填）', { exact: true }).fill('');
+    await editor().getByRole('button', { name: '完成', exact: true }).click(); await saveFund();
     await planView();
     assert.equal(Number((await page.locator('.strategy-amount').textContent()).replace(/[^\d]/g, '')), 4100);
     await tab(page, '设置'); await openSection('基金与交易限制');
-    await page.locator('.settings-section .list-row').filter({ hasText: '111111' }).click();
-    await dialog().locator('.form-advanced summary').click();
-    await dialog().getByLabel('核实日期（选填）', { exact: true }).fill('2000-01-01');
-    await dialog().getByRole('button', { name: '保存', exact: true }).click(); await closeWait();
+    await page.locator('.settings-detail .list-row').filter({ hasText: '111111' }).click();
+    await editor().getByRole('button', { name: /更多选项/ }).click();
+    await editor().getByLabel('核实日期（选填）', { exact: true }).fill('2000-01-01');
+    await editor().getByRole('button', { name: '完成', exact: true }).click(); await saveFund();
     await planView();
     assert.equal(Number((await page.locator('.strategy-amount').textContent()).replace(/[^\d]/g, '')), 4100);
     // Set a calendar through actual settings controls; half review does not trade.
     await putSeed(page, seed(date), 3); await tab(page, '设置');
+    await openSection('策略与检查');
     await page.locator('.settings-strategy .settings-route').click();
     const annualDate = await page.evaluate(d => Strategy.addMonths(d, 6), date);
     await dialog().getByLabel('年度检查锚点日期', { exact: true }).fill(annualDate);
     await dialog().getByRole('button', { name: '保存', exact: true }).click(); await closeWait();
-    await tab(page, '现在'); await page.getByRole('button', { name: '开始半年检查 ›', exact: true }).click();
+    await tab(page, '现在'); await review('开始半年检查 ›');
     const checked = page.getByRole('button', { name: '本次已检查，不交易', exact: true });
     assert.equal(await checked.isDisabled(), true);
     for (const input of await page.locator('.review-check input').all()) await input.check();
@@ -126,7 +131,7 @@ async function main() {
     annual.snapshots[0].holdings = { '111111': 300000, '222222': 250000, '333333': 400000 };
     annual.snapshots[0].cash.c = 50000;
     await putSeed(page, annual, 3);
-    await page.getByRole('button', { name: '开始年度检查 ›', exact: true }).click();
+    await review('开始年度检查 ›');
     assert.equal(await page.evaluate(() => Store.get('todos').length), 0);
     await shot('annual-preview');
     await page.getByRole('button', { name: '预览确认后，生成卖出计划', exact: true }).click();
@@ -146,7 +151,7 @@ async function main() {
     assert.equal(await page.evaluate(() => Store.get('todos').some(t => t.kind === 'buy')), false);
     // New money still comes first, even on an annual due date.
     const funded = seed(date); funded.settings.reviewPolicy.annualDate = date;
-    await putSeed(page, funded, 3); await page.getByRole('button', { name: '开始年度检查 ›', exact: true }).click();
+    await putSeed(page, funded, 3); await review('开始年度检查 ›');
     assert.match(await page.locator('.page').textContent(), /先投新钱，暂不卖旧仓/);
     assert.equal(await page.getByRole('button', { name: '预览确认后，生成卖出计划', exact: true }).count(), 0);
     await page.getByRole('button', { name: '检查完成，暂不交易', exact: true }).click();
@@ -159,7 +164,7 @@ async function main() {
       await page.setViewportSize({ width, height: 844 });
       for (const name of ['现在', '历史', '统计', '设置']) {
         await tab(page, name);
-        if (name === '设置') for (const title of ['目标配置', '现金保护', '基金与交易限制', '数据与同步']) await openSection(title);
+        if (name === '设置') for (const title of ['目标配置', '现金保护', '基金与交易限制', '数据与备份']) { await tab(page, '设置'); await openSection(title); }
         assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth && document.querySelector('.page').scrollWidth <= innerWidth), 'Overflow at ' + width + ' ' + name);
       }
       await planView();

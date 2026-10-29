@@ -13,13 +13,17 @@ async function main() {
   page.setDefaultTimeout(10000);
   const artifacts = path.resolve(__dirname, '../artifacts/release-2026-10-30');
   fs.mkdirSync(artifacts, { recursive: true });
-  const shot = name => page.screenshot({ path: path.join(artifacts, engine + '-' + name + '.png') });
+  const shot = name => page.screenshot({ path: path.join(artifacts, engine + '-' + name + '.png'), animations: 'disabled' });
   const dialog = () => page.locator('.modal-mask:not(.closing)');
   const closeWait = () => page.locator('.modal-mask').waitFor({ state: 'detached' });
   const planView = async () => { await tab(page, '现在'); await page.getByRole('button', { name: /这个月该做什么/ }).click(); };
+  async function openSection(title) {
+    const section = page.locator('.settings-section').filter({ has: page.locator('summary').filter({ hasText: title }) }).first();
+    if (await section.getAttribute('open') === null) await section.locator(':scope > summary').click();
+  }
   async function editFund(status, cap) {
     await tab(page, '设置');
-    await page.locator('summary').filter({ hasText: '基金与交易限制' }).click();
+    await openSection('基金与交易限制');
     await page.locator('.settings-section .list-row').filter({ hasText: '111111' }).click();
     await dialog().getByLabel('申购状态', { exact: true }).selectOption(status);
     if (cap !== undefined) await dialog().getByLabel('每日总限额', { exact: true }).fill(String(cap));
@@ -37,7 +41,7 @@ async function main() {
     await shot('limited-buy');
     await tab(page, '设置'); await shot('settings');
     for (const title of ['目标配置', '现金保护', '基金与交易限制', '数据与同步']) assert.equal(await page.locator('summary').filter({ hasText: title }).count(), 1);
-    await page.locator('summary').filter({ hasText: '基金与交易限制' }).click();
+    await openSection('基金与交易限制');
     await page.locator('.settings-section .list-row').filter({ hasText: '111111' }).click();
     await shot('limit-editor');
     await dialog().getByLabel('每日总限额', { exact: true }).fill('-1');
@@ -50,14 +54,14 @@ async function main() {
       assert.equal(Number(actual.replace(/[^\d]/g, '')), total);
     }
     // Same-plan execution stays stable and records only actual money, never the budget.
-    await page.locator('.equation-card .list-row').filter({ hasText: '今天买 纳指' }).click();
+    await page.locator('.equation-card .list-row').filter({ hasText: '建议买 纳指' }).click();
     await dialog().getByRole('button', { name: /^做了 / }).click();
     await dialog().locator('input').fill('50');
     await dialog().getByRole('button', { name: '记下', exact: true }).click(); await closeWait();
     assert.equal(await page.evaluate(() => Store.get('flows')[0].amount), 50);
     assert.equal(await page.evaluate(() => Ledger.latest(Store.get('snapshots')).cash.c), 70000);
     assert.match(await page.locator('.page').textContent(), /本次盘点的同一份计划/);
-    await page.locator('.equation-card .list-row').filter({ hasText: '今天买 长债' }).click();
+    await page.locator('.equation-card .list-row').filter({ hasText: '建议买 长债' }).click();
     await dialog().getByRole('button', { name: /^做了 / }).click();
     await dialog().locator('input').fill('4000');
     await dialog().getByRole('button', { name: '记下', exact: true }).click(); await closeWait();
@@ -67,13 +71,43 @@ async function main() {
     await planView();
     assert.match(await page.locator('.page').textContent(), /先录入已包含这些交易的真实余额/);
     assert.equal(await page.locator('.page .list-row').count(), 0);
-    // Cash settlement is an explicit balance update, not a calendar countdown.
-    const wait = seed(date); wait.settings.cashBuckets = { c: { role: 'investable', settleDays: 2 } };
-    await putSeed(page, wait, 3); await planView();
-    assert.equal(Number((await page.locator('.strategy-amount').textContent()).replace(/[^\d]/g, '')), 0);
-    assert.match(await page.locator('.page').textContent(), /赎回并实际到账后更新余额/);
-    assert.equal(await page.evaluate(() => Store.get('todos').length), 0);
-    await shot('waiting-cash');
+    // Legacy account roles/delays must be ignored, not merely hidden.
+    const legacy = seed(date); legacy.settings.cashBuckets = { c: { role: 'buffer', settleDays: 365 } };
+    await putSeed(page, legacy, 3); await planView();
+    assert.equal(Number((await page.locator('.strategy-amount').textContent()).replace(/[^\d]/g, '')), 4100);
+    assert.doesNotMatch(await page.locator('.page').textContent(), /待到账|今天可用/);
+    const labeled = seed(date);
+    labeled.snapshots[0].cash = { cash: 10000, instant_buffer: 20000, moneymarket: 40000 };
+    labeled.settings.cashBuckets = { cash: { role: 'buffer', settleDays: 99 }, instant_buffer: { role: 'buffer', settleDays: 0 }, moneymarket: { role: 'investable', settleDays: 2 } };
+    await putSeed(page, labeled, 3); await tab(page, '设置');
+    await openSection('现金保护');
+    assert.doesNotMatch(await page.locator('.page').textContent(), /现金用途|到账等待|instant_buffer|moneymarket|\bcash\b|日日宝|月月宝/);
+    assert.equal(await page.locator('.settings-route').filter({ hasText: /现金账户|日日宝|月月宝/ }).count(), 0);
+    assert.equal(await page.evaluate(() => JSON.stringify(Config.get().cashBuckets)), JSON.stringify(labeled.settings.cashBuckets));
+    await shot('cash-simplified');
+    await tab(page, '现在'); await page.getByRole('button', { name: '录入最新余额', exact: true }).click();
+    for (const name of ['现金账户', '日日宝', '月月宝']) await page.getByText(name, { exact: true }).waitFor();
+    assert.doesNotMatch(await page.locator('.page').textContent(), /instant_buffer|moneymarket|\bcash\b/);
+    assert.equal(await page.evaluate(() => JSON.stringify(Store.get('snapshots'))), JSON.stringify(labeled.snapshots));
+    await page.getByRole('button', { name: '先不存,回去', exact: true }).click();
+    // Metadata is optional in the real form and remains optional after reload/import.
+    await putSeed(page, seed(date), 4); await tab(page, '设置');
+    await openSection('基金与交易限制');
+    await page.locator('.settings-section .list-row').filter({ hasText: '111111' }).click();
+    await dialog().locator('.form-advanced summary').click();
+    await dialog().getByLabel('购买平台（选填）', { exact: true }).fill('');
+    await dialog().getByLabel('核实日期（选填）', { exact: true }).fill('');
+    await dialog().getByLabel('今日其他订单已用额度（选填）', { exact: true }).fill('');
+    await dialog().getByRole('button', { name: '保存', exact: true }).click(); await closeWait();
+    await planView();
+    assert.equal(Number((await page.locator('.strategy-amount').textContent()).replace(/[^\d]/g, '')), 4100);
+    await tab(page, '设置'); await openSection('基金与交易限制');
+    await page.locator('.settings-section .list-row').filter({ hasText: '111111' }).click();
+    await dialog().locator('.form-advanced summary').click();
+    await dialog().getByLabel('核实日期（选填）', { exact: true }).fill('2000-01-01');
+    await dialog().getByRole('button', { name: '保存', exact: true }).click(); await closeWait();
+    await planView();
+    assert.equal(Number((await page.locator('.strategy-amount').textContent()).replace(/[^\d]/g, '')), 4100);
     // Set a calendar through actual settings controls; half review does not trade.
     await putSeed(page, seed(date), 3); await tab(page, '设置');
     await page.locator('.settings-strategy .settings-route').click();
@@ -125,7 +159,7 @@ async function main() {
       await page.setViewportSize({ width, height: 844 });
       for (const name of ['现在', '历史', '统计', '设置']) {
         await tab(page, name);
-        if (name === '设置') for (const title of ['目标配置', '现金保护', '基金与交易限制', '数据与同步']) await page.locator('summary').filter({ hasText: title }).click();
+        if (name === '设置') for (const title of ['目标配置', '现金保护', '基金与交易限制', '数据与同步']) await openSection(title);
         assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth && document.querySelector('.page').scrollWidth <= innerWidth), 'Overflow at ' + width + ' ' + name);
       }
       await planView();
@@ -136,7 +170,7 @@ async function main() {
     assert.notEqual(hero.bg, 'none'); assert.match(hero.bg, /gradient/);
     await shot('dark-buy');
     assert.deepEqual(errors, []); assert.deepEqual(writes, []);
-    console.log(JSON.stringify({ browser: engine, status: 'pass', tests: ['settings-edit', 'four-subscription-states', 'zero-limit', 'actuals-not-budget', 'same-plan-multiple-funds', 'manual-pending-fence', 'settlement', 'calendar-edit', 'half-check-no-trade', 'annual-confirm-cancel', 'annual-sells-only', 'new-money-first', 'responsive', 'dark-theme'], externalWrites: 0, pageErrors: errors }, null, 2));
+    console.log(JSON.stringify({ browser: engine, status: 'pass', tests: ['settings-edit', 'no-account-cash-controls', 'legacy-cash-rules-ignored', 'chinese-balance-entry', 'optional-fund-metadata', 'four-subscription-states', 'zero-limit', 'actuals-not-budget', 'same-plan-multiple-funds', 'manual-pending-fence', 'calendar-edit', 'half-check-no-trade', 'annual-confirm-cancel', 'annual-sells-only', 'new-money-first', 'responsive', 'dark-theme'], externalWrites: 0, pageErrors: errors }, null, 2));
   } finally { await context.close(); await browser.close(); if (local) await new Promise(resolve => local.server.close(resolve)); }
 }
 main().catch(e => { console.error(e); process.exitCode = 1; });

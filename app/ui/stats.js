@@ -19,6 +19,7 @@ var StatsUI = (function () {
 
   var el, period = 'all', categoryView = false, selectedCategory = null, chartOffset = 0, chartScope = 'portfolio';
   var MAX_BARS = 12;          // 图上最多画几期
+  var overviewScroll = 0;
   var NS = 'http://www.w3.org/2000/svg';
 
   function h(tag, attrs, kids) {
@@ -130,33 +131,31 @@ var StatsUI = (function () {
   }
   function categoryPanel(w, snaps, flows, st) {
     var con = Stats.contribution(snaps, flows, st);
-    w.appendChild(note('不是从建仓日起累计利润。期初市值作基准；净买入是内部调配，不等于外部新存入的钱。'));
     if (!con.ok) { w.appendChild(h('div', { class: 'note' }, [con.why])); return; }
     w.appendChild(note('收益区间 ' + con.from + ' — ' + con.to + ' · 不含组合外估值'));
     var rows = con.rows.slice().sort(function (a, b) { return b.market - a.market; });
     var max = Math.max.apply(null, rows.map(function (r) { return Math.abs(r.market); }).concat([1]));
-    if (!rows.some(function (r) { return r.category === selectedCategory; })) selectedCategory = rows.length ? rows[0].category : null;
+    if (!rows.some(function (r) { return r.category === selectedCategory; })) selectedCategory = null;
     var list = h('div', { class: 'category-list' });
     rows.forEach(function (r) {
       var width = Math.abs(r.market) / max * 45;
       list.appendChild(h('button', { class: 'category-row' + (selectedCategory === r.category ? ' selected' : ''),
         style: '--c:' + Palette.color(r.category), 'aria-expanded': String(selectedCategory === r.category),
-        onclick: function () { selectedCategory = r.category; render(); } }, [
+        onclick: function () { selectedCategory = selectedCategory === r.category ? null : r.category; render(); } }, [
         h('div', {}, [h('div', { class: 'ttl' }, [h('i', { class: 'dot' }), r.category]),
           h('div', { class: 'sub2' }, ['净买入 ' + signed(r.inflow)])]),
         h('div', { class: 'diverging-bar', 'aria-hidden': 'true' }, [h('i', {
           style: 'left:' + (r.market < 0 ? 50 - width : 50) + '%;width:' + width + '%',
         })]), h('b', { class: 'amount' }, [signed(r.market)]),
       ]));
+      if (selectedCategory === r.category) list.appendChild(h('div', { class: 'equation-card category-detail' }, [h('h2', {}, [r.category + ' · 把账拆开']),
+        valueRow('期初市值', money(r.from)), valueRow('＋ 区间净买入', signed(r.inflow)),
+        valueRow('＋ 区间盈亏', signed(r.market)), valueRow('− 现金分红', money(r.dividend)), valueRow('＝ 期末市值', money(r.to)),
+      ]));
     });
     w.appendChild(list);
     var row = rows.filter(function (r) { return r.category === selectedCategory; })[0];
     if (!row) return;
-    w.appendChild(h('div', { class: 'equation-card' }, [h('h2', {}, [row.category + ' · 把账拆开']),
-      valueRow('期初市值', money(row.from)), valueRow('＋ 区间净买入', signed(row.inflow)),
-      valueRow('＋ 区间盈亏', signed(row.market)), valueRow('− 现金分红', money(row.dividend)),
-      valueRow('＝ 期末市值', money(row.to)),
-    ]));
     var known = {}, names = {};
     Config.allKnown(st).forEach(function (f) { known[f.code] = f.category || '未分类'; names[f.code] = f.name || f.code; });
     var pf = Ledger.perFund(snaps[snaps.length - 1], snaps[0]);
@@ -178,7 +177,8 @@ var StatsUI = (function () {
   function render() {
     var w = h('div', { class: 'wrap dashboard' });
     var snaps = Store.get('snapshots', []) || [], st = Config.get(), flows = Todos.flows();
-    w.appendChild(h('h1', {}, [categoryView ? '各类区间盈亏' : '统计']));
+    if (categoryView) w.appendChild(Dom.backBar('各类区间盈亏', function () { categoryView = false; render(); Dom.restoreScroll(overviewScroll); }));
+    else w.appendChild(h('h1', {}, ['统计']));
     w.appendChild(h('p', { class: 'sub' }, [categoryView ? '看哪类赚了、哪类亏了，点一类能复算' : '先选时间，再看这段时间发生了什么']));
     if (snaps.length < 2) { w.appendChild(h('div', { class: 'note' }, ['至少要两次盘点才有得比。'])); replace(w); return; }
     w.appendChild(periodTabs());
@@ -188,7 +188,6 @@ var StatsUI = (function () {
     w.appendChild(h('div', { class: 'range-line' }, [h('span', {}, [range.from + ' — ' + range.to]), h('span', {}, ['组合口径'])]));
     if (sum.ok && (sum.from !== range.from || range.limited)) w.appendChild(note('收益仅核算 ' + sum.from + ' — ' + sum.to + '；更早买卖不全，不当作零收益。'));
     if (categoryView) {
-      w.appendChild(h('button', { class: 'link', onclick: function () { categoryView = false; Dom.toTop(); render(); } }, ['‹ 返回统计']));
       categoryPanel(w, covered, flows, st); replace(w); return;
     }
     if (!sum.ok) w.appendChild(h('div', { class: 'note' }, [sum.why + '。不把未知当成零。']));
@@ -202,6 +201,7 @@ var StatsUI = (function () {
         h('span', {}, ['＝']), h('div', {}, [h('span', {}, ['组合总额变化']), h('b', { class: 'amount' }, [signed(sum.change)])]),
       ]),
     ]));
+    w.appendChild(h('button', { class: 'btn ghost category-jump', onclick: function () { overviewScroll = Dom.scrollPosition(); categoryView = true; Dom.toTop(); render(); } }, ['查看各类区间盈亏 ›']));
     w.appendChild(h('h2', {}, ['资产增长']));
     var comp = Stats.composition(range.snapshots, st);
     var end = Math.max(1, comp.length - chartOffset), begin = Math.max(0, end - MAX_BARS), shown = comp.slice(begin, end);
@@ -237,7 +237,6 @@ var StatsUI = (function () {
       h('b', {}, [sum.ok ? '收益可核算：' + sum.from + ' 起，连续 ' + sum.periods + ' 个区间' : '尚无完整收益区间']),
       note('外部净流入由余额与买卖推算；现金类利息未单独拆分，不等于工资减花费。组合外估值不计入投资盈亏。'),
     ]));
-    w.appendChild(h('button', { class: 'btn ghost', style: 'margin-top:16px', onclick: function () { categoryView = true; Dom.toTop(); render(); } }, ['查看各类区间盈亏 ›']));
     var rates = h('details', { class: 'secondary-details' }, [h('summary', {}, ['收益率 · 盘点期近似'])]);
     var g = Stats.gate(covered);
     if (!g.ok) rates.appendChild(note('所选收益区间不足 ' + Stats.MIN_PERIODS + ' 期；不延长区间凑数。'));

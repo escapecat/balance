@@ -128,8 +128,12 @@ var NowUI = (function () {
   function renderHome(w, c) {
     w.className = 'wrap dashboard';
     w.appendChild(h('h1', {}, ['现在']));
-    w.appendChild(h('p', { class: 'sub' }, [c.snap.date + ' 盘点 · 非实时余额']));
     w.appendChild(heroBlock(c, true));
+    w.appendChild(h('div', { class: 'button-pair home-actions' }, [
+      h('button', { class: 'btn', onclick: onEntry }, [c.stale ? '录这个月的数字' : '录入最新余额']),
+      h('button', { class: 'btn ghost', onclick: function () { view = 'plan'; render(); } }, ['这个月该做什么 ›']),
+    ]));
+    w.appendChild(h('button', { class: 'link quick-record', onclick: recordOne }, [Dom.icon('plus'), '记一笔买卖']));
     if (c.extBlank.length) w.appendChild(h('div', { class: 'note', onclick: onEntry }, [c.extBlank.join('、') + ' 还没填金额，点此补录。']));
     var prev = c.snaps.length > 1 ? c.snaps[c.snaps.length - 2] : null;
     var d = prev ? Ledger.delta(c.snap, prev) : null;
@@ -156,17 +160,12 @@ var NowUI = (function () {
     }
     if (typeof Sync !== 'undefined' && Sync.ready() && Sync.cfg().dirty)
       w.appendChild(h('div', { class: 'note warn' }, ['有改动还没推到云端，请到设置同步。同步不是独立备份。']));
-    w.appendChild(h('div', { class: 'button-pair' }, [
-      h('button', { class: 'btn', onclick: onEntry }, [c.stale ? '录这个月的数字' : '录入最新余额']),
-      h('button', { class: 'btn ghost', onclick: recordOne }, ['记一笔买卖']),
-    ]));
     var key = Allocate.contextKey(c.snap, c.st);
     var open = Todos.open().filter(function (t) {
       return t.version === 3 && t.contextKey === key && t.executionDate === today() &&
         (t.kind !== 'sell' || Strategy.approved(c.snap, c.st, today()));
     }).length;
-    w.appendChild(h('button', { class: 'link', style: 'width:100%;margin-top:8px', onclick: function () { view = 'plan'; render(); } },
-      [open ? '这个月该做什么 · 还欠 ' + open + ' 件 ›' : '这个月该做什么 ›']));
+    if (open) w.appendChild(h('div', { class: 'hint' }, ['本次计划还有 ' + open + ' 项未记录成交。']));
     reviewCard(w, c);
     var allocation = h('details', { class: 'secondary-details' }, [h('summary', {}, ['盘点时的配置 · 全部 ' + c.sm.rows.length + ' 类'])]);
     c.sm.rows.forEach(function (r) {
@@ -260,24 +259,24 @@ var NowUI = (function () {
       w.appendChild(sells); return;
     }
     var hero = h('div', { class: 'strategy-summary' }, [
-      h('span', { class: 'hint' }, ['今天可执行的买入 · 计划，不是成交']),
+      h('span', { class: 'hint' }, ['本次建议买入 · 已考虑基金限额']),
       h('div', { class: 'strategy-amount amount' }, ['¥' + money(plan.spentToday)]),
-      h('div', { class: 'hint' }, ['本次分配 ¥' + money(plan.budget) + ' · 受限待投 ¥' + money(plan.restrictedAmount) + ' · 待到账 ¥' + money(plan.waitingCash)]),
+      h('div', { class: 'hint' }, ['本次分配 ¥' + money(plan.budget) + ' · 受限待投 ¥' + money(plan.restrictedAmount)]),
     ]);
     w.appendChild(h('h2', {}, ['日常新钱补仓 · 只买不卖'])); w.appendChild(hero);
     w.appendChild(h('div', { class: 'cash-breakdown' }, [
       h('span', {}, ['盘点现金 ¥' + money(c.sm.cash)]), h('span', {}, ['保留 ¥' + money(c.sm.cash - plan.cashAvailable)]),
-      h('span', {}, ['可投 ¥' + money(plan.cashAvailable)]), h('span', {}, ['今天可用 ¥' + money(plan.liquidNow)]),
+      h('span', {}, ['可投 ¥' + money(plan.cashAvailable)]),
     ]));
+    w.appendChild(h('div', { class: 'hint' }, ['按盘点现金合计计算；现金赎回、到账和实际下单由你自行安排。']));
     plan.rows.filter(function (r) { return r.budget > 0; }).forEach(function (r) {
       var card = h('section', { class: 'equation-card' }, [
         h('h2', {}, [r.category]),
         h('div', { class: 'hint' }, ['目标缺口 ¥' + money(r.need) + ' · 本次分配 ¥' + money(r.budget)]),
       ]);
-      if (r.today > 0) card.appendChild(todoRow(by[Todos.keyOf('buy', r.fund.code)], { category: r.category, amount: r.today }, (r.fund.name || r.fund.code) + ' · ' + (r.limit.platform || ''), '今天买 ' + r.category));
-      else card.appendChild(h('div', { class: 'equation-row' }, [h('span', {}, ['今天能买']), h('b', {}, ['¥0'])]));
+      if (r.today > 0) card.appendChild(todoRow(by[Todos.keyOf('buy', r.fund.code)], { category: r.category, amount: r.today }, [r.fund.name || r.fund.code, r.limit.platform].filter(Boolean).join(' · '), '建议买 ' + r.category));
+      else card.appendChild(h('div', { class: 'equation-row' }, [h('span', {}, ['建议买入']), h('b', {}, ['¥0'])]));
       if (r.restricted) card.appendChild(h('div', { class: 'pending-label' }, ['受限待投 ¥' + money(r.restricted) + ' · ' + r.limit.why]));
-      if (r.waitingCash) card.appendChild(h('div', { class: 'pending-label' }, ['待到账 ¥' + money(r.waitingCash) + ' · 赎回并实际到账后更新余额，不按天数自动解锁']));
       w.appendChild(card);
     });
     if (plan.pendingAmount) w.appendChild(h('div', { class: 'note' }, ['待投资金仍是现金，不算已补齐，不自动改买其他类别。下次补仓核实限制再计算；若连续多期受限，评估同指数其他通道，不承诺固定几天买完。']));
@@ -288,7 +287,7 @@ var NowUI = (function () {
 
   function renderReview(w, c) {
     var date = today(), sc = Strategy.schedule(c.st, date), half = view === 'half', checks = [false, false, false];
-    w.appendChild(h('h1', {}, [half ? '半年检查' : '年度评估']));
+    w.appendChild(Dom.backBar(half ? '半年检查' : '年度评估', function () { view = 'home'; render(); }));
     w.appendChild(h('p', { class: 'sub' }, [half ? '检查不是交易；不因检查完成生成买卖' : '日期到期只是检查入口，不代表必须卖出']));
     w.appendChild(h('div', { class: 'policy-card' }, [h('b', {}, [sc.configured ? '年度 ' + sc.annualDate + (sc.halfDate ? ' · 半年 ' + sc.halfDate : '') : '尚未设置首次检查日'])]));
     var why = Strategy.block(c.snap, date) || Allocate.configurationIssue(c.st);
@@ -323,7 +322,6 @@ var NowUI = (function () {
         Modal.confirm({ title: '本次检查完成，暂不交易？', body: '只记录检查结果，并安排下一次年度检查；不写买卖流水。', ok: '确认检查完成' }).then(function (yes) { if (yes) finishReview('annual', 'no-trade', c); });
       } }, ['检查完成，暂不交易']));
     }
-    w.appendChild(h('button', { class: 'link', onclick: function () { view = 'home'; render(); } }, ['返回现在']));
   }
   function finishReview(kind, decision, c) {
     // 弹窗期间数据可能从另一设备更新，旧上下文不能用来签发授权。
@@ -379,7 +377,7 @@ var NowUI = (function () {
     if (view === 'home') { renderHome(w, ctx); el.appendChild(w); return; }
     if (view === 'half' || view === 'annual') { renderReview(w, ctx); el.appendChild(w); return; }
 
-    w.appendChild(h('h1', {}, ['本次执行计划']));
+    w.appendChild(Dom.backBar('补仓与执行建议', function () { view = 'home'; render(); }));
     w.appendChild(h('p', { class: 'sub' }, [snap.date + ' 盘点 · 组合 ¥' + money(sm.total) + ' · 非实时余额']));
 
     if (extBlank.length) {
@@ -401,7 +399,6 @@ var NowUI = (function () {
     var body = h('div', stale ? { style: 'opacity:.6' } : {});
 
     if (renderExecution(body, ctx) === false) {
-      body.appendChild(h('button', { class: 'link', onclick: function () { view = 'home'; render(); } }, ['返回现在']));
       w.appendChild(body); el.appendChild(w); return;
     }
 
@@ -530,12 +527,7 @@ var NowUI = (function () {
     //    于是刚录完的那 25 天里,想补一笔外部资产、想改抄错的数字,一个入口都没有。
     //    tools/view.js 打出「可点 0」才发现:整页没有一处能点。
     //    不过期的时候用次要样式,别跟「今天该买什么」抢注意力。
-    // ⚠️ 方案屏的出口是「知道了」,不是「再录一期」。
-    //    这一屏是**录完之后看的**,再摆一个录入按钮等于邀请你连录两期。
-    body.appendChild(h('button', {
-      class: 'btn', style: 'margin-top:24px',
-      onclick: function () { view = 'home'; render(); },
-    }, ['知道了']));
+    // 方案屏使用顶部统一返回栏；不用滚到页尾才能离开。
 
     w.appendChild(body);
     el.appendChild(w);

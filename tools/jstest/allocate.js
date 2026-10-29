@@ -12,8 +12,8 @@ var crypto = require('crypto');
 assert.equal(A.contextKey(snap, settings).length, 71);
 function invariant(p, st, s) {
   assert.equal(p.spentToday + p.pendingAmount, p.budget);
-  assert.equal(p.restrictedAmount + p.waitingCash, p.pendingAmount);
-  assert(p.spentToday <= p.cashAvailable && p.spentToday <= p.liquidNow);
+  assert.equal(p.restrictedAmount, p.pendingAmount);
+  assert(p.spentToday <= p.cashAvailable);
   assert(p.budget <= p.cashAvailable);
   assert(p.cashLeft >= s.cash.c - P.investableCash(s, st));
   p.rows.forEach(function (r) { assert(r.today <= r.budget && r.budget <= r.need); });
@@ -35,13 +35,17 @@ invariant(p, settings, snap);
 var old = clone(settings); delete old.funds[0].trade; old.funds[0].dailyLimit = 99999;
 assert.equal(plan(null, old).rows[0].today, 0, 'Legacy limits must not imply current availability');
 var stale = clone(settings); stale.funds[0].trade.checkedOn = '2026-10-29';
-assert.equal(plan(null, stale).rows[0].today, 0);
+assert.equal(plan(null, stale).rows[0].today, 100, 'A stale optional note must not disable the entered limit');
+var optional = clone(settings); delete optional.funds[0].trade.platform; delete optional.funds[0].trade.checkedOn;
+assert.equal(plan(null, optional).rows[0].today, 100, 'Platform and review date are not trading prerequisites');
+assert(T.valid({ status: 'open' })); assert(T.valid({ status: 'limited', dailyLimit: 100 }));
+assert(!T.valid({ status: 'limited' })); assert(!T.valid({ status: 'limited', dailyLimit: -1 }));
 var used = clone(settings); Object.assign(used.funds[0].trade, { usedDate: date, usedAmount: 20 });
 assert.equal(plan(null, used, [{ date: date, code: '111111', kind: 'buy', amount: 30 }]).rows[0].today, 50);
 assert.equal(plan(null, used, [{ date: date, code: '111111', kind: 'buy', amount: 500 }]).rows[0].today, 0);
 var wait = clone(settings); wait.cashBuckets = { c: { role: 'investable', settleDays: 2 } };
-var wp = plan(null, wait); assert.equal(wp.spentToday, 0); assert.equal(wp.waitingCash, 4100); invariant(wp, wait, snap);
-wait.cashBuckets.c.role = 'buffer'; assert.equal(plan(null, wait).cashAvailable, 0);
+var wp = plan(null, wait); assert.equal(wp.spentToday, 4100); invariant(wp, wait, snap);
+wait.cashBuckets.c.role = 'buffer'; assert.equal(plan(null, wait).cashAvailable, 20000, 'Removed bucket rules must not silently reserve cash');
 var floor = clone(settings); floor.cashFloor = 100000; assert.equal(plan(null, floor).budget, 0);
 var invalid = clone(settings); invalid.targets.纳指 = 'bad';
 assert(plan(null, invalid).invalid); assert.equal(plan(null, invalid).today.length, 0);
@@ -71,4 +75,4 @@ for (var i = 1; i <= 160; i++) {
   st.funds[0].trade.dailyLimit = i % 11; invariant(plan(s, st), st, s);
 }
 assert.equal(T.isDate('2027-02-29'), false); assert.equal(T.isDate('2028-02-29'), true);
-console.log('  Allocation ok: constrained budgets, zero/unknown/stale, used quota, settlement, cash floors, explicit routes, annual preview and locks');
+console.log('  Allocation ok: constrained budgets, zero/unknown, optional metadata, used quota, ignored legacy cash roles, cash floors, routes and annual locks');

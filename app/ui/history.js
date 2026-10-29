@@ -14,7 +14,7 @@
 
 var HistoryUI = (function () {
 
-  var el, onChanged = null;
+  var el, onChanged = null, listScroll = 0;
 
   function h(tag, attrs, kids) {
     var n = document.createElement(tag);
@@ -166,6 +166,7 @@ var HistoryUI = (function () {
    *     **拿弹窗当页面用,做出来一定丑。** 弹窗是用来说一句话的。
    */
   function openSnapshot(s0) {
+    listScroll = Dom.scrollPosition();
     var all = Store.get('snapshots', []) || [];
     var i = all.findIndex(function (x) { return x.date === s0.date; });
     viewing = { snap: s0, prev: i > 0 ? all[i - 1] : null,
@@ -182,7 +183,7 @@ var HistoryUI = (function () {
     var name = {};
     Config.allKnown(st).forEach(function (f) { name[f.code] = f.name || f.code; });
 
-    w.appendChild(h('h1', {}, [v.snap.date]));
+    w.appendChild(Dom.backBar(v.snap.date, function () { viewing = null; render(); Dom.restoreScroll(listScroll); }));
 
     w.appendChild(Dom.hero(d.total, d.external || 0, '当期总资产'));
 
@@ -231,10 +232,6 @@ var HistoryUI = (function () {
       ]));
     }
 
-    w.appendChild(h('button', {
-      class: 'btn ghost', style: 'margin-top:20px',
-      onclick: function () { viewing = null; render(); },
-    }, ['返回']));
     w.appendChild(h('button', {
       class: 'link danger', style: 'margin-top:8px',
       onclick: function () { dropSnapshot(v); },

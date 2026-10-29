@@ -36,7 +36,7 @@ def check(browser, url):
     page.get_by_role("button", name=re.compile(r"^做了 ")).click()
     page.locator(".modal-mask:not(.closing) input").fill("20000")
     page.get_by_role("button", name="记下", exact=True).click()
-    page.get_by_role("button", name="知道了", exact=True).click()
+    page.locator(".subpage-bar").get_by_role("button", name="返回", exact=True).click()
     expect(page.get_by_text("盘点后已记 1 笔,待下次对账", exact=False)).to_be_visible()
     expect(page.get_by_text("基金申购要 T+1", exact=False)).to_have_count(0)
     checks = page.evaluate("""() => {
@@ -76,7 +76,7 @@ def check(browser, url):
       Store.set('__meta',{schema:1});
     }""", dates)
     page.reload()
-    expect(page.get_by_text("策略与交易限制已升级", exact=True)).to_be_visible()
+    expect(page.get_by_text("补仓设置已简化", exact=True)).to_be_visible()
     assert page.evaluate("Store.get('__meta').schema === Store.SCHEMA")
     assert page.evaluate("Store.getRollback().version") == 1
     assert page.evaluate("Actions.between(Store.get('snapshots')[1],null).length") == 1

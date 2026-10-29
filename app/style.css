@@ -809,7 +809,7 @@ h2 .n { color: var(--text-dim2); font-weight: 500; margin-left: var(--s1);
 .app-top { flex:none; height:56px; padding:0 var(--s4); display:flex; align-items:center;
   justify-content:space-between; gap:var(--s3); border-bottom:1px solid var(--border); }
 .brand { display:flex; align-items:center; gap:var(--s2); color:var(--accent); font-weight:700; font-size:var(--t-md); }
-.brand-mark { width:24px; height:24px; border:1px solid var(--accent); border-radius:50%; display:grid; place-items:center; font-size:var(--t-base); }
+.brand-mark { width:28px; height:28px; border-radius:7px; object-fit:contain; display:block; }
 .app-top>.hint { font-size:var(--t-xs); margin:0; }
 .dashboard { padding-top:var(--s5); padding-bottom:var(--s6); }
 .dashboard .sub { margin-bottom:var(--s4); font-size:var(--t-sm); }
@@ -892,3 +892,35 @@ button:focus-visible,summary:focus-visible,input:focus-visible,select:focus-visi
 .review-check { display:flex; align-items:center; gap:var(--s3); min-height:var(--tap); padding:var(--s3); margin:var(--s3) 0; border:1px solid var(--border); border-radius:var(--r-md); font-size:var(--t-sm); }
 .review-check input { width:20px; height:20px; flex:none; accent-color:var(--accent); }
 .btn:disabled { opacity:.5; cursor:default; }
+
+/* Mobile routes: fixed-size icons, one obvious return control, no duplicated brand header. */
+.ui-icon { display:block; width:22px; height:22px; flex:none; }
+.tabbar button { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; }
+.tabbar .ui-icon { width:22px; height:22px; }
+.icon-button { min-width:var(--tap); min-height:var(--tap); display:inline-flex; align-items:center; justify-content:center;
+  border:0; border-radius:var(--r-sm); background:var(--surface); color:var(--accent); cursor:pointer; padding:var(--s2); }
+.subpage-bar { position:sticky; top:0; z-index:8; display:flex; align-items:center; gap:var(--s2); min-height:56px;
+  background:var(--surface); border-bottom:1px solid var(--border); margin:calc(-1 * var(--s4)) calc(-1 * var(--s4)) var(--s3); padding:var(--s1) var(--s2); }
+.subpage-bar h1 { margin:0; font-size:var(--t-md); line-height:1.4; }
+.app-top:has(+ .page .subpage-bar) { display:none; }
+.quick-record { display:flex; align-items:center; justify-content:center; gap:var(--s2); width:100%; }
+.quick-record .ui-icon { width:17px; height:17px; }
+.home-actions { margin-bottom:0; }.home-actions .btn { font-size:var(--t-sm); }
+.category-jump { margin-top:var(--s3); min-height:var(--tap); }
+.category-detail { margin:0 0 var(--s2); background:var(--surface-2); }
+.entry-actions { flex:none; width:100%; max-width:560px; background:var(--surface); border-top:1px solid var(--border);
+  display:flex; align-items:center; gap:var(--s2); padding:var(--s2) var(--s4) calc(var(--s2) + env(safe-area-inset-bottom)); margin:0 auto; }
+.wrap>.entry-actions { position:sticky; bottom:calc(-1 * var(--s4)); z-index:5; margin-top:var(--s4); }
+.entry-actions .btn { margin:0 !important; flex:2; width:auto; min-width:0; }.entry-actions .link { flex:1; min-height:var(--tap); font-size:var(--t-sm); }
+.modal-dismiss { position:sticky; top:0; float:right; margin-top:calc(-1 * var(--s3)); z-index:5; }
+.modal-title { padding-right:var(--s2); }.form-advanced { margin-top:var(--s3); border-top:1px solid var(--border); }
+@media(max-width:600px) {
+  .app-top { height:44px; }.app-top>.hint { display:none; }
+  .hero { padding:var(--s4); }.hero-num { font-size:32px; }.hero-sub { margin-top:var(--s2); }
+  .profit-card { padding:var(--s3); margin:var(--s3) 0; }.profit-number { font-size:32px; }
+  .period-tabs { margin:var(--s3) 0; }.range-line { margin:var(--s2) 0; }
+  .metric-card { padding:var(--s3); }.metric-card b { font-size:22px; }
+  .section-heading { margin-top:var(--s3); }.policy-card { padding:var(--s3); }
+  .page input,.page select,.page textarea,.page .list-row input,.modal-sheet input,.modal-sheet select { font-size:16px; }
+  .modal-sheet { max-height:90dvh; }
+}

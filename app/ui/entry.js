@@ -15,7 +15,7 @@
 
 var EntryUI = (function () {
 
-  var el, draft = null, onDone = null;
+  var el, draft = null, onDone = null, footerHost = null;
   // 底部对账区的当前节点 + 它依赖的上一期 —— 输入时要就地换掉它
   var sumBox = null, sumPrev = null;
 
@@ -109,7 +109,7 @@ var EntryUI = (function () {
     count(draft.holdings, funds.map(function (f) { return f.code; }));
     count(draft.cash, Object.keys(prev.cash || {}));
 
-    w.appendChild(h('h1', {}, ['录入 ' + draft.date.slice(0, 7)]));
+    w.appendChild(Dom.backBar('录入 ' + draft.date.slice(0, 7), function () { saveDraft(); if (onDone) onDone(false); }));
     w.appendChild(h('p', { class: 'sub' }, [
       '留空 = 沿用上次。已填 ' + filled + ' / ' + total,
     ]));
@@ -186,15 +186,18 @@ var EntryUI = (function () {
     sumBox = summary(prev);
     w.appendChild(sumBox);
 
-    w.appendChild(h('button', {
+    var actions = h('div', { class: 'entry-actions' });
+    actions.appendChild(h('button', {
       class: 'btn', style: 'margin-top:16px', onclick: submit,
     }, ['保存这一期']));
-    w.appendChild(h('button', {
+    actions.appendChild(h('button', {
       class: 'link', style: 'margin-top:8px',
       onclick: function () { if (onDone) onDone(false); },
     }, ['先不存,回去']));
+    if (!footerHost) w.appendChild(actions);
 
     el.appendChild(w);
+    if (footerHost) footerHost.appendChild(actions);
   }
 
   /** 就地换掉底部对账区。**不重建输入框** —— 那会丢焦点和光标位置。 */
@@ -429,6 +432,7 @@ var EntryUI = (function () {
   function mount(node, opts) {
     el = node;
     onDone = (opts || {}).onDone;
+    footerHost = (opts || {}).footerHost || null;
     draft = Ledger.loadDraft() || { date: today(), holdings: {}, cash: {},
                                     external: {}, netInflow: '', declared: '' };
     // ⚠️ 草稿的日期**过期了就换成今天**,不是只在为空时才补。

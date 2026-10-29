@@ -100,10 +100,34 @@ var Dom = (function () {
       if (r[0] === '组合外估值' && !external) return;
       split.appendChild(h('div', {}, [h('span', { class: 'k' }, [r[0]]), h('span', { class: 'v amount' }, ['¥' + money(r[1])])]));
     });
-    box.appendChild(split);
+    if (external) box.appendChild(split);
     return box;
   }
-  return { text: text, label: label, LABEL: LABEL, toTop: toTop, h: h, money: money, signed: signed, hero: hero };
+  function icon(name) {
+    var paths = {
+      now: ['M3 11 12 3l9 8', 'M5 10v10h5v-6h4v6h5V10'],
+      history: ['M3 10a9 9 0 1 1 2 8', 'M3 4v6h6', 'M12 7v5l3 2'],
+      stats: ['M4 20V12', 'M12 20V4', 'M20 20V8'],
+      settings: ['M4 6h16M4 12h16M4 18h16', 'M8 3v6M16 9v6M10 15v6'],
+      back: ['m14 5-7 7 7 7'], close: ['m6 6 12 12M18 6 6 18'], plus: ['M12 5v14M5 12h14']
+    };
+    var node = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    var attrs = { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.8',
+      'stroke-linecap': 'round', 'stroke-linejoin': 'round', class: 'ui-icon', 'aria-hidden': 'true', focusable: 'false' };
+    Object.keys(attrs).forEach(function (k) { node.setAttribute(k, attrs[k]); });
+    (paths[name] || paths.back).forEach(function (d) { var p = document.createElementNS('http://www.w3.org/2000/svg', 'path'); p.setAttribute('d', d); node.appendChild(p); });
+    return node;
+  }
+  function backBar(title, onBack) {
+    return h('header', { class: 'subpage-bar' }, [
+      h('button', { type: 'button', class: 'icon-button', 'aria-label': '返回', title: '返回上一页', onclick: onBack }, [icon('back')]),
+      h('h1', {}, [title]),
+    ]);
+  }
+  function scrollPosition() { var page = document.querySelector('.page'); return page ? page.scrollTop : 0; }
+  function restoreScroll(value) { var page = document.querySelector('.page'); if (page) page.scrollTop = value; }
+  return { text: text, label: label, LABEL: LABEL, toTop: toTop, h: h, money: money, signed: signed, hero: hero,
+    icon: icon, backBar: backBar, scrollPosition: scrollPosition, restoreScroll: restoreScroll };
 })();
 
 if (typeof module !== 'undefined') module.exports = Dom;

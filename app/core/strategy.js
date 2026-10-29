@@ -25,7 +25,7 @@ var Strategy = (function () {
     var approval = (Store.get('prefs', {}) || {}).strategyApproval, recheck = false;
     if (approval && approval.base === p.annualDate && next) {
       var items = (Store.get('todos', []) || []).filter(function (t) { return t.kind === 'sell' && t.contextKey === approval.contextKey; });
-      var outstanding = !items.length || items.some(function (t) { return t.status === 'open' || t.status === 'partial'; });
+      var outstanding = !items.length || items.some(function (t) { return t.status === 'open' || t.status === 'partial' || t.status === 'held'; });
       var latest = Ledger.latest(Store.get('snapshots', []) || []);
       recheck = outstanding && (approval.date !== date || !latest || approval.contextKey !== Allocate.contextKey(latest, s));
     }

@@ -17,10 +17,10 @@
   var booted = Store.boot();
 
   var TABS = [
-    { id: 'now', label: '现在', icon: '◎' },
-    { id: 'history', label: '历史', icon: '≡' },
-    { id: 'stats', label: '统计', icon: '⌗' },
-    { id: 'me', label: '设置', icon: '⚙' },
+    { id: 'now', label: '现在', icon: 'now' },
+    { id: 'history', label: '历史', icon: 'history' },
+    { id: 'stats', label: '统计', icon: 'stats' },
+    { id: 'me', label: '设置', icon: 'settings' },
   ];
 
   function h(tag, attrs, kids) {
@@ -46,7 +46,7 @@
           render();
           toTop();
         },
-      }, [h('span', { class: 'ic' }, [t.icon]), h('span', {}, [t.label])]));
+      }, [Dom.icon(t.icon), h('span', {}, [t.label])]));
     });
     return nav;
   }
@@ -101,13 +101,15 @@
     //    overflow:hidden），表现是长页面根本翻不下去。
     var page = h('div', { class: 'page' });
     if (!entering) root.appendChild(h('div', { class: 'app-top' }, [
-      h('div', { class: 'brand' }, [h('span', { class: 'brand-mark', 'aria-hidden': 'true' }, ['≡']), 'Balance']),
+      h('div', { class: 'brand' }, [h('img', { class: 'brand-mark', src: 'icon-192.png', width: '28', height: '28', alt: '' }), 'Balance']),
       h('span', { class: 'hint' }, ['记录资产，分清投入与盈亏']),
     ]));
 
     // 录入是全屏接管 —— 抄数字的时候底下不该还挂着 tab 栏勾着你的注意力
     if (entering) {
+      root.appendChild(page);
       EntryUI.mount(page, {
+        footerHost: root,
         // ⚠️ **存成功就直接进方案屏**,不回主界面。
         //    再平衡建议依附于「刚录完一期」这个事件 —— 那一刻你手里
         //    正好有最新的数、也正好在想「那我该买什么」。
@@ -119,7 +121,6 @@
           render();
         },
       });
-      root.appendChild(page);
       return;
     }
 
@@ -188,9 +189,9 @@
   // 升级过就说一声 —— 静默升级和静默出错长得一模一样,
   // 而你需要知道「今天这个数不对」和「昨天我升过级」有没有关系。
   if (booted.ok && booted.migrated && booted.migrated.length) {
-    Modal.note({ title: '策略与交易限制已升级',
-                 body: '历史余额、成交金额和目标比例没有修改，不用重记。旧未执行计划已暂停重评，不代表达标。' +
-                       '请到设置选择年度检查日，并核实基金申购状态、平台和限额；未核实不会生成买入。' +
+    Modal.note({ title: '补仓设置已简化',
+                 body: '已移除逐个现金账户的用途与到账设置。补仓按现金合计、统一现金保底和目标比例计算，现金赎回与到账由你自行安排。' +
+                       '购买平台和核实日期改为选填，不再要求每天核实。历史余额、成交金额和目标比例没有修改，不用重记。旧未执行计划已暂停重评，不代表达标。基金限购与检查日规则保留。' +
                        (booted.migrated.indexOf('1→2') >= 0 ? '同日盘点后的买卖归期也已修复，下次照实录余额即可。' : '') +
                        '升级前已留本机回滚点；确认无误后可手动同步新版数据，其他设备需先刷新应用。' });
   }

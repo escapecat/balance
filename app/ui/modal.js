@@ -45,22 +45,33 @@ var Modal = (function () {
   function open(build) {
     return new Promise(function (resolve) {
       close();
-      var done = function (v) { close(); resolve(v); };
+      var previousFocus = document.activeElement;
+      var done = function (v) { close(); if (previousFocus && previousFocus.isConnected && previousFocus.focus) previousFocus.focus({ preventScroll: true }); resolve(v); };
       host = h('div', {
         class: 'modal-mask',
         onclick: function (e) { if (e.target === host) done(null); },
       });
       var box = h('div', { class: 'modal-sheet', role: 'dialog', 'aria-modal': 'true' });
+      box.appendChild(h('button', { type: 'button', class: 'icon-button modal-dismiss', 'aria-label': '关闭', onclick: function () { done(null); } }, [Dom.icon('close')]));
       build(box, done);
       host.appendChild(box);
       document.body.appendChild(host);
 
-      escHandler = function (e) { if (e.key === 'Escape') done(null); };
+      escHandler = function (e) {
+        if (e.key === 'Escape') done(null);
+        if (e.key === 'Tab' && box.querySelectorAll) {
+          var focusable = Array.prototype.filter.call(box.querySelectorAll('button,input,select,textarea,a'), function (n) { return !n.disabled && n.getClientRects().length; });
+          var first = focusable[0], last = focusable[focusable.length - 1];
+          if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+          else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+        }
+      };
       document.addEventListener('keydown', escHandler);
 
       // 有输入框就自动聚焦并全选 —— 少一次点击
       var inp = box.querySelector('input');
-      if (inp) setTimeout(function () { inp.focus(); inp.select && inp.select(); }, 30);
+      var touch = typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches;
+      if (inp && !touch) setTimeout(function () { inp.focus({ preventScroll: true }); if (inp.type !== 'date' && inp.select) inp.select(); }, 30);
     });
   }
 
@@ -212,6 +223,8 @@ var Modal = (function () {
       var vals = {};
       Object.keys(o.values || {}).forEach(function (k) { vals[k] = o.values[k]; });
       var err = h('div', { class: 'note danger', style: 'display:none' });
+      var advanced = h('details', { class: 'form-advanced' }, [h('summary', {}, ['更多选项（选填）'])]);
+      var hasAdvanced = false;
 
       (o.fields || []).forEach(function (f) {
         var row = h('div', { style: 'margin-top:12px' });
@@ -246,9 +259,10 @@ var Modal = (function () {
         }
         input.setAttribute('aria-label', f.label);
         row.appendChild(input);
-        box.appendChild(row);
+        if (f.advanced) { advanced.appendChild(row); hasAdvanced = true; } else box.appendChild(row);
       });
 
+      if (hasAdvanced) box.appendChild(advanced);
       box.appendChild(err);
       box.appendChild(h('button', {
         class: 'btn', style: 'margin-top:16px',

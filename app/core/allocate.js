@@ -43,7 +43,7 @@ var Allocate = (function () {
       if (Array.isArray(v)) return v.map(stable);
       var n = {}; Object.keys(v).sort().forEach(function (k) { n[k] = stable(v[k]); }); return n;
     }
-    return Digest.hash(JSON.stringify(stable({ snapshot: snap, settings: settings })));
+    return Digest.hash(JSON.stringify(stable({ policyVersion: 4, snapshot: snap, settings: settings })));
   }
   function configurationIssue(s) {
     var targets = s.targets || {}, sum = s.cashTarget == null ? 0.05 : s.cashTarget;
@@ -58,10 +58,9 @@ var Allocate = (function () {
     date = date || Trade.today();
     var issue = configurationIssue(settings);
     if (issue) return { mode: 'monthly', invalid: issue, version: 3, today: [], daily: [], deferred: [], rows: [],
-      budget: 0, spentToday: 0, pendingAmount: 0, restrictedAmount: 0, waitingCash: 0, cashAvailable: 0, liquidNow: 0 };
+      budget: 0, spentToday: 0, pendingAmount: 0, restrictedAmount: 0, cashAvailable: 0 };
     flows = flows || (typeof Actions !== 'undefined' ? Actions.all() : []);
     var sm = Portfolio.summarize(snap, settings), cash = Portfolio.investableCash(snap, settings);
-    var liquid = Math.min(cash, Portfolio.liquidNow(snap, settings));
     var primary = buyingOf(settings, snap.holdings);
     var rows = gaps(sm).filter(function (g) { return g.need >= 1; }).sort(function (a, b) { return b.need - a.need; });
     var totalNeed = rows.reduce(function (n, r) { return n + r.need; }, 0);
@@ -72,9 +71,9 @@ var Allocate = (function () {
       r.eligible = Math.min(r.budget, r.limit.remaining);
       r.restricted = r.budget - Math.floor(r.eligible);
     });
-    var executable = distribute(rows, liquid, 'eligible'), today = [], deferred = [];
-    rows.forEach(function (r, i) {
-      r.today = executable[i]; r.waitingCash = Math.max(0, Math.floor(r.eligible) - r.today);
+    var today = [], deferred = [];
+    rows.forEach(function (r) {
+      r.today = Math.floor(r.eligible);
       if (r.today > 0) today.push({ category: r.category, fund: r.fund, amount: r.today });
       if (r.budget > r.today) deferred.push(r);
     });
@@ -84,9 +83,8 @@ var Allocate = (function () {
       rows: rows, today: today, daily: [], deferred: deferred, skipped: [], spentToday: spent,
       budget: budget, pendingAmount: budget - spent,
       restrictedAmount: rows.reduce(function (n, r) { return n + r.restricted; }, 0),
-      waitingCash: rows.reduce(function (n, r) { return n + r.waitingCash; }, 0),
       shortfall: Math.max(0, Math.round(totalNeed - cash)), cashAvailable: Math.floor(cash),
-      liquidNow: Math.floor(liquid), cashLeft: Math.max(0, sm.cash - spent), daysNeeded: null };
+      cashLeft: Math.max(0, sm.cash - spent), daysNeeded: null };
   }
   // 年度只预览卖出与未来资金去向。买入必须在真实到账、更新余额后重新计算。
   function planAnnual(snap, settings, date) {

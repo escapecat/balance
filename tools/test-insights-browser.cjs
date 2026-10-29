@@ -35,7 +35,7 @@ async function putSeed(page, data, version) {
   await page.reload();
   const migration = page.locator('.modal-mask:not(.closing)');
   if (await migration.count()) {
-    assert.match(await migration.locator('.modal-title').textContent(), /升级|修复/);
+    assert.match(await migration.locator('.modal-title').textContent(), /升级|修复|已简化/);
     await migration.getByRole('button', { name: '知道了', exact: true }).click();
     await page.locator('.modal-mask').waitFor({ state: 'detached' });
   }

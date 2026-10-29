@@ -34,7 +34,8 @@ var Config = (function () {
   }
 
   function save(patch) {
-    var s = Object.assign(get(), patch);
+    var current = get(), s = Object.assign({}, current, patch);
+    if (Store.same(current, s)) return current;
     return Store.set('settings', s) === false ? null : s;
   }
 

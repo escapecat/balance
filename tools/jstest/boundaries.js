@@ -132,7 +132,8 @@ eq(Store.exportAll().data.snapshots, upgraded.data.snapshots);
 // 升级/导入写失败:旧数据和版本一起恢复,不能半份新半份旧。
 var old = Store.exportAll();
 failKey = 'balance:flows';
-assert.throws(function () { Store.importAll(legacy); }, /保存/);
+var changedImport = clone(legacy); changedImport.data.flows[0].amount += 1;
+assert.throws(function () { Store.importAll(changedImport); }, /保存/);
 eq(Store.exportAll().data, old.data);
 eq(Store.exportAll().version, old.version);
 console.log('  对账边界 ok(先录后买 · 先买后录 · 同日重录 · 次月不重不漏 · 修改撤销 · 升级同步回滚)');

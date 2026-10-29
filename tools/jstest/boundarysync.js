@@ -39,7 +39,7 @@ Sync.saveCfg({ owner: 'fixture', repo: 'private-fixture', token: 'test', dirty: 
 Sync.autoPull().then(function (r) {
   assert(r.pulled, '成功的 importAll summary 不是失败,自动拉取必须重新渲染');
   assert.strictEqual(Store.exportAll().version, Store.SCHEMA);
-  assert.strictEqual(Sync.cfg().dirty, false);
+  assert.strictEqual(Sync.cfg().dirty, true, '旧云端导入后的真实数据升级仍需同步，不能当作已上传');
   var s = Store.get('snapshots');
   assert.strictEqual(Actions.between(s[1], null).length, 1);
   assert.strictEqual(Ledger.delta(s[1], s[0]).market, 0);

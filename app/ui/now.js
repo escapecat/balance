@@ -302,19 +302,23 @@ var NowUI = (function () {
     w.appendChild(Dom.backBar(half ? '半年检查' : '年度评估', function () { view = 'home'; render(); }));
     w.appendChild(h('p', { class: 'sub' }, [half ? '检查不是交易；不因检查完成生成买卖' : '日期到期只是检查入口，不代表必须卖出']));
     w.appendChild(h('div', { class: 'policy-card' }, [h('b', {}, [sc.configured ? '年度 ' + sc.annualDate + (sc.halfDate ? ' · 半年 ' + sc.halfDate : '') : '首次盘点后自动计算检查日'])]));
-    var why = Strategy.block(c.snap, date) || Allocate.configurationIssue(c.st);
-    if (why) { w.appendChild(h('div', { class: 'note warn' }, [why])); w.appendChild(h('button', { class: 'btn', onclick: onEntry }, ['录入最新余额'])); }
-    else if (half) {
+    w.appendChild(h('div', { class: 'hint review-reference' }, ['共用 ' + c.snap.date + ' 的盘点；例行检查只留痕，不用再抄一次余额。']));
+    if (half) {
       var done = h('button', { class: 'btn', disabled: 'disabled', onclick: function () {
         if (!checks.every(Boolean)) return;
         finishReview('half', 'checked', c);
       } }, ['本次已检查，不交易']);
-      ['生活与应急现金足够，近期用途没有变化', '目标配置仍符合自己的风险承受能力', '已看过偏离与交易限制，不需要自动买卖'].forEach(function (label, i) {
+      ['生活与应急现金足够，近期用途没有变化', '目标配置仍符合自己的风险承受能力', '已看过现有盘点与限制，本次只检查、不生成交易'].forEach(function (label, i) {
         w.appendChild(h('label', { class: 'review-check' }, [h('input', { type: 'checkbox', onchange: function (e) { checks[i] = e.target.checked; done.disabled = !checks.every(Boolean) || !sc.halfDue; } }), h('span', {}, [label])]));
       });
       if (!sc.halfDue) w.appendChild(h('div', { class: 'note' }, ['半年检查尚未到期或已经记过。本页可查看安排，不会重复留痕。']));
       w.appendChild(done);
     } else {
+      var why = Strategy.block(c.snap, date) || Allocate.configurationIssue(c.st);
+      if (why) {
+        w.appendChild(h('div', { class: 'note warn review-trade-block' }, [why + '。这只阻止生成交易计划，不影响记录本次检查、暂不交易；已有成交仍待后续对账。']));
+        w.appendChild(h('button', { class: 'link', onclick: onEntry }, ['需要评估交易时再更新余额']));
+      } else {
       var a = Allocate.planAnnual(c.snap, c.st, date), newMoney = Allocate.suggestMode(c.snap, c.st).mode === 'monthly';
       w.appendChild(h('div', { class: 'note' }, [newMoney ? '先投新钱，暂不卖旧仓。成交到账、更新余额后再评估是否还需要卖出。' : a.inBand ? '各类超配未越过偏差带，本次无需生成卖出。' : '有类别超过偏差带；先看预览，是否交易由你确认。']));
       if (!newMoney) {
@@ -330,8 +334,9 @@ var NowUI = (function () {
       if ((sc.annualDue || sc.annualRecheck) && !newMoney && a.sells.length) w.appendChild(h('button', { class: 'btn', onclick: function () {
         Modal.confirm({ title: '确认生成年度卖出计划？', body: '请先核对锁定期、赎回费用与资金到账。确认仅生成卖出待办，不是已经成交。卖出款到账并更新余额后才算买入；限购时可能继续持有待投资金。', ok: '确认生成卖出计划' }).then(function (yes) { if (yes) finishReview('annual', 'approved', c); });
       } }, ['预览确认后，生成卖出计划']));
+      }
       if (sc.annualDue || sc.annualRecheck) w.appendChild(h('button', { class: 'btn ghost', onclick: function () {
-        Modal.confirm({ title: '本次检查完成，暂不交易？', body: '只记录检查结果，并安排下一次年度检查；不写买卖流水。', ok: '确认检查完成' }).then(function (yes) { if (yes) finishReview('annual', 'no-trade', c); });
+        Modal.confirm({ title: '本次检查完成，暂不交易？', body: '只记录本次检查结果、安排下一次年度检查，不生成买卖；已有成交不会因此被标成已对账。', ok: '确认检查完成' }).then(function (yes) { if (yes) finishReview('annual', 'no-trade', c); });
       } }, ['检查完成，暂不交易']));
     }
   }
@@ -738,7 +743,8 @@ var NowUI = (function () {
     render();
   }
 
-  return { mount: mount, showPlan: showPlan };
+  function refreshSync() { if (view === 'home') { var pos = Dom.scrollPosition(); render(); Dom.restoreScroll(pos); } }
+  return { mount: mount, showPlan: showPlan, refreshSync: refreshSync };
 })();
 
 if (typeof module !== 'undefined') module.exports = NowUI;

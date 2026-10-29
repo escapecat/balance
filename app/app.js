@@ -168,6 +168,7 @@
   //    两边都有对方没有的东西时,谁覆盖谁需要你看着数字决定。
   if (typeof Sync !== 'undefined' && Sync.ready()) {
     Sync.autoPull().then(function (r) {
+      if (r && r.reconciled && !entering && current === 'now') NowUI.refreshSync();
       if (!r || !r.pulled) return;
       render();
       Modal.note({

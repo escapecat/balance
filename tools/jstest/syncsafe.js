@@ -15,14 +15,17 @@ var pushed = [];          // 记录每次「真的发出去了」的内容
 var SYNCED = { settings: 1, snapshots: 1, assets: 1, todos: 1, flows: 1, prefs: 1 };
 
 global.Store = {
-  get: function (k, d) { return mem[k] === undefined ? d : mem[k]; },
+  same: require('../../app/lib/store.js').same,
+  get: function (k, d) { return mem[k] === undefined ? d : JSON.parse(JSON.stringify(mem[k])); },
   // ⚠️ **桩必须复刻真实 Store.set 的行为**,包括那句 markDirty。
   //    少了它,「拉完会不会反手推」这条测的就是个空气 ——
   //    把 sync.js 里的 quiet 判断整行删掉,测试照样全绿。
   //    桩和实现行为不一致的时候,测试不是没测到,是**在证明一件假事**。
   set: function (k, v) {
-    mem[k] = v;
+    if (global.Store.same(mem[k], v)) return true;
+    mem[k] = JSON.parse(JSON.stringify(v));
     if (SYNCED[k] && typeof Sync !== 'undefined') Sync.markDirty();
+    return true;
   },
   exportAll: function () {
     return { version: 1, exportedAt: '2026-08-10T00:00:00Z',
@@ -116,7 +119,7 @@ Sync.push({}).then(function (r) {
   ok(JSON.parse(pushed[0]).data.snapshots.length === 2, '推上去的是本机那两期');
 
   // ---- 3. ★ sha 过期 = 另一台设备改过 → 拒绝盖 ----
-  reset(SNAP, SNAP);
+  reset(SNAP, SNAP.concat([{ date: '2026-09-30' }]));
   mem.sync.sha = '早就过期的 sha';
   return Sync.push({});
 }).then(function (r4) {

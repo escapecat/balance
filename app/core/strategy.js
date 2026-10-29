@@ -53,21 +53,22 @@ var Strategy = (function () {
     return '';
   }
   function review(kind, decision, snap, settings, date) {
-    var due = schedule(settings, date), why = block(snap, date);
-    if (why) return { ok: false, why: why };
+    if (!Trading.isDate(date)) return { ok: false, why: '无效检查日期' };
+    var due = schedule(settings, date);
     if (kind !== 'annual' && kind !== 'half') return { ok: false, why: '无效检查类型' };
-    if (Allocate.configurationIssue(settings)) return { ok: false, why: Allocate.configurationIssue(settings) };
     if (kind === 'annual' ? !due.annualDue && !due.annualRecheck : !due.halfDue) return { ok: false, why: '这次检查尚未到期或已经记过了' };
     if (kind === 'half' && decision !== 'checked') return { ok: false, why: '半年检查只留痕，不生成交易' };
     if (kind === 'annual' && ['no-trade', 'approved'].indexOf(decision) < 0) return { ok: false, why: '请选择明确的检查结果' };
     var prefs = Store.get('prefs', {}) || {};
     var cycleDate = due.annualRecheck ? prefs.strategyApproval.dueDate : due.annualDate;
     if (decision === 'approved') {
+      var why = block(snap, date) || Allocate.configurationIssue(settings);
+      if (why) return { ok: false, why: why };
       if (Allocate.suggestMode(snap, settings).mode === 'monthly') return { ok: false, why: '先用可投新钱修正配置，更新余额后再评估卖出' };
       var plan = Allocate.planAnnual(snap, settings, date);
       if (!plan.sells.length) return { ok: false, why: '当前没有可生成的卖出计划' };
       prefs.strategyApproval = { contextKey: plan.contextKey, date: date, dueDate: cycleDate, base: policy(settings).startDate, calendar: 'start-v1' };
-    } else delete prefs.strategyApproval;
+    } else if (kind === 'annual') delete prefs.strategyApproval;
     var start = policy(settings).startDate, n = 1, next = due.annualDate;
     if (kind === 'annual') { next = addMonths(start, 12); while (next && next <= date) { n++; next = addMonths(start, n * 12); } }
     prefs.strategyReviews = reviews().concat([{ kind: kind, decision: decision, date: date,
